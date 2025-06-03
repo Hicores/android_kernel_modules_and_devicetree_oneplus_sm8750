@@ -3979,6 +3979,8 @@ static void oplus_abnormal_adapter_check_work(struct work_struct *work)
 
 	if (chip->wired_present == (!!data.intval))
 		return;
+	/* do not add any code here */
+	WRITE_ONCE(chip->wired_present, !!data.intval);
 
 	if (chip->cpa_current_type != CHG_PROTOCOL_VOOC && chip->retention_state) {
 		chg_info("clear_abnormal_adapter_dis_cnt\n");
@@ -3991,7 +3993,6 @@ static void oplus_abnormal_adapter_check_work(struct work_struct *work)
 		mmi_chg = !get_client_vote(chip->common_chg_suspend_votable,
 					   MMI_CHG_VOTER);
 
-	WRITE_ONCE(chip->wired_present, !!data.intval);
 	if (!chip->wired_present) {
 		chip->svooc_detach_time = local_clock() / 1000000;
 		/*pm8550bhs cid gpio9 pull out  by 50ms cycle pulse detect,when adapter pull out need to wait 50ms*/

@@ -205,7 +205,7 @@
 					05 00 00 00 00 00 01 29
 				];
 				/* pwm */
-				qcom,mdss-dsi-timming-pwm-switch-onepulse-command = [
+				qcom,mdss-dsi-timming-switch-pwm-mode2-command = [
 					//1pulse code 120hz
 					39 00 00 40 00 00 04 FF 5A A5 00
 					15 00 00 40 00 00 02 60 0B
@@ -511,7 +511,7 @@
 					05 00 00 00 00 00 01 29
 				];
 				/* pwm */
-				qcom,mdss-dsi-timming-pwm-switch-onepulse-command = [
+				qcom,mdss-dsi-timming-switch-pwm-mode2-command = [
 					//1pulse code 90hz
 					39 00 00 40 00 00 04 FF 5A A5 00
 					15 00 00 40 00 00 02 60 0C
@@ -820,7 +820,7 @@
 					05 00 00 00 00 00 01 29
 				];
 				/* pwm */
-				qcom,mdss-dsi-timming-pwm-switch-onepulse-command = [
+				qcom,mdss-dsi-timming-switch-pwm-mode2-command = [
 					//1pulse code 60hz
 					39 00 00 40 00 00 04 FF 5A A5 00
 					15 00 00 40 00 00 02 60 0B
@@ -1124,7 +1124,7 @@
 					05 00 00 00 00 00 01 29
 				];
 				/* pwm */
-				qcom,mdss-dsi-timming-pwm-switch-onepulse-command = [
+				qcom,mdss-dsi-timming-switch-pwm-mode2-command = [
 					//1pulse code 120hz
 					39 00 00 40 00 00 04 FF 5A A5 00
 					15 00 00 40 00 00 02 60 0B
@@ -1930,8 +1930,12 @@
 		Bit6: sending extend cmd while panel power on accroding to current pwm mode
 		Bit7: sending extend cmd while timing switch accroding to current pwm pulse level
 		Bit8: sending extend cmd after sending dbv threshold cmd in another thread
+		...
+		Bit24:support pwm mode0
+		Bit25:support pwm mode1
+		Bit26:support pwm mode2
 	*/
-	oplus,pwm-switch-config = <0x67>;
+	oplus,pwm-switch-config = <0x07000067>;
 	/*	oplus,pwm-switch-mode0-states-info/oplus,pwm-switch-mode1-states-info:
 		Specific dbv threshold and pulse info of 2 pwm mode, for pulse, 0 symbols 1pulse,
 		1symbols 3pulse and 2 symbols 18pulse. The format should be 1 dbv threshold info with
@@ -1941,14 +1945,14 @@
 	oplus,pwm-switch-mode0-states-info = <2 1100 1>;
 	oplus,pwm-switch-mode1-states-info = <2 1100 0>;
 	oplus,pwm-switch-mode2-states-info = <0>;
-	/*	oplus,pwm-cmd-switch-map:
+	/*	oplus,pwm-mode1-cmd-switch-map/oplus,pwm-mode2-cmd-switch-map;
 		Specific cmd replace relationship while in switch on(1pulse) mode. It is a string array that
 		compose with cmd names, every 2 names combine 1 map. For example, map "'a', 'b'" means replace
 		a to b while sending a in switch on mode.
 	*/
-	oplus,pwm-cmd-switch-map = "qcom,mdss-dsi-lp1-command", "qcom,mdss-dsi-aod-on-1pulse-command",
-			"qcom,mdss-dsi-nolp-command", "qcom,mdss-dsi-aod-off-1pulse-command",
-			"qcom,mdss-dsi-timing-switch-command", "qcom,mdss-dsi-timming-pwm-switch-onepulse-command";
+	oplus,pwm-mode2-cmd-switch-map = "qcom,mdss-dsi-lp1-command", "qcom,mdss-dsi-aod-on-pwm-mode2-command",
+			"qcom,mdss-dsi-nolp-command", "qcom,mdss-dsi-aod-off-pwm-mode2-command",
+			"qcom,mdss-dsi-timing-switch-command", "qcom,mdss-dsi-timming-switch-pwm-mode2-command";
 
 	/* ofp config */
 	oplus,ofp-fp-type = <0xc0>;

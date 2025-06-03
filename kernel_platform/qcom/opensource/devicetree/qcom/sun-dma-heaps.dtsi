@@ -25,7 +25,7 @@
 
 		qcom,qseecom_ta {
 			qcom,dma-heap-name = "qcom,qseecom-ta";
-			qcom,dma-heap-type = <HEAP_TYPE_CMA>;
+			qcom,dma-heap-type = <HEAP_TYPE_CARVEOUT>;
 			memory-region = <&qseecom_ta_mem>;
 		};
 

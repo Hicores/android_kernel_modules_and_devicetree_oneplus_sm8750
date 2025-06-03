@@ -162,7 +162,7 @@ int i2c_read(struct nfc_dev *nfc_dev, char *buf, size_t count, int timeout)
 					 __func__);
 				nfc_dev->nfc_vbat_monitor.vbat_monitor_status =
 					false;
-				ret = -ENOTCONN;
+				ret = -EREMOTEIO;
 				goto err;
 			}
 //#endif /* CONFIG_NXP_NFC_VBAT_MONITOR */

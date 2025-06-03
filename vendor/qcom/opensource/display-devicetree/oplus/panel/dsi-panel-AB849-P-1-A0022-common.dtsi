@@ -104,7 +104,7 @@
 				qcom,mdss-dsi-pwm-state-l3tol1-command-state = "dsi_hs_mode";
 				qcom,mdss-dsi-pwm-dbv-threshold-extend-command-state = "dsi_hs_mode";
 				qcom,mdss-dsi-pwm-switch-mode1-panel-on-command-state = "dsi_hs_mode";
-				qcom,mdss-dsi-timming-pwm-switch-onepulse-command-state = "dsi_hs_mode";
+				qcom,mdss-dsi-timming-switch-pwm-mode1-command-state = "dsi_hs_mode";
 				qcom,mdss-dsi-adfr-min-fps-0-command-state = "dsi_hs_mode";
 				qcom,mdss-dsi-adfr-min-fps-1-command-state = "dsi_hs_mode";
 				qcom,mdss-dsi-adfr-min-fps-2-command-state = "dsi_hs_mode";

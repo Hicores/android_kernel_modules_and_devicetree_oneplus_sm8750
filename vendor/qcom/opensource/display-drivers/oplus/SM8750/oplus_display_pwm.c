@@ -23,16 +23,20 @@
 #endif /* OPLUS_FEATURE_DISPLAY_ADFR */
 
 /* -------------------- macro -------------------- */
+#define OPLUS_PWM_MODE				24
 /* pwm feature bit setting */
-#define OPLUS_PWM_SUPPORT									(BIT(0))
-#define OPLUS_PWM_SWITCH_SUPPORT							(BIT(1))
-#define OPLUS_PWM_SWITCH_CMD_SUPPORT						(BIT(2))
-#define OPLUS_PWM_DBV_THRESHOLD_CMD					        (BIT(3))
-#define OPLUS_PWM_DBV_THRESHOLD_CMD_WAIT_TE					(BIT(4))
-#define OPLUS_PWM_CMD_REPLACE								(BIT(5))
-#define OPLUS_PWM_PANEL_ON_EXT_CMD							(BIT(6))
-#define OPLUS_PWM_TIMING_SWITCH_EXT_CMD						(BIT(7))
-#define OPLUS_PWM_DBV_THREESHOLD_EXT_CMD					(BIT(8))
+#define OPLUS_PWM_SUPPORT                         (BIT(0))
+#define OPLUS_PWM_SWITCH_SUPPORT                  (BIT(1))
+#define OPLUS_PWM_SWITCH_CMD_SUPPORT              (BIT(2))
+#define OPLUS_PWM_DBV_THRESHOLD_CMD               (BIT(3))
+#define OPLUS_PWM_DBV_THRESHOLD_CMD_WAIT_TE       (BIT(4))
+#define OPLUS_PWM_CMD_REPLACE                     (BIT(5))
+#define OPLUS_PWM_PANEL_ON_EXT_CMD                (BIT(6))
+#define OPLUS_PWM_TIMING_SWITCH_EXT_CMD           (BIT(7))
+#define OPLUS_PWM_DBV_THREESHOLD_EXT_CMD          (BIT(8))
+#define OPLUS_PWM_MODE0                           (BIT(24))  /* generally 18 + 3 pulse */
+#define OPLUS_PWM_MODE1                           (BIT(25))  /* generally 18 + 1 pulse */
+#define OPLUS_PWM_MODE2                           (BIT(26))  /* generally  1 + 1 pulse */
 
 /* -------------------- extern ---------------------------------- */
 extern u32 oplus_last_backlight;
@@ -64,6 +68,48 @@ bool oplus_panel_pwm_support(struct dsi_panel *panel)
 		return false;
 	}
 	return (bool)((panel->oplus_panel.pwm_params.pwm_config) & OPLUS_PWM_SUPPORT);
+}
+
+bool oplus_panel_pwm_mode0_support(struct dsi_panel *panel)
+{
+	if (!panel) {
+		OPLUS_PWM_ERR("Invalid dsi_panel params\n");
+		return false;
+	}
+
+	if (!oplus_panel_pwm_support(panel)) {
+		OPLUS_PWM_DEBUG("pwm feature was not supported, so pwm switch was not support\n");
+		return false;
+	}
+	return (bool)((panel->oplus_panel.pwm_params.pwm_config) & OPLUS_PWM_MODE0);
+}
+
+bool oplus_panel_pwm_mode1_support(struct dsi_panel *panel)
+{
+	if (!panel) {
+		OPLUS_PWM_ERR("Invalid dsi_panel params\n");
+		return false;
+	}
+
+	if (!oplus_panel_pwm_support(panel)) {
+		OPLUS_PWM_DEBUG("pwm feature was not supported, so pwm switch was not support\n");
+		return false;
+	}
+	return (bool)((panel->oplus_panel.pwm_params.pwm_config) & OPLUS_PWM_MODE1);
+}
+
+bool oplus_panel_pwm_mode2_support(struct dsi_panel *panel)
+{
+	if (!panel) {
+		OPLUS_PWM_ERR("Invalid dsi_panel params\n");
+		return false;
+	}
+
+	if (!oplus_panel_pwm_support(panel)) {
+		OPLUS_PWM_DEBUG("pwm feature was not supported, so pwm switch was not support\n");
+		return false;
+	}
+	return (bool)((panel->oplus_panel.pwm_params.pwm_config) & OPLUS_PWM_MODE2);
 }
 
 bool oplus_panel_pwm_switch_support(struct dsi_panel *panel)
@@ -284,6 +330,10 @@ int oplus_panel_parse_pwm_config(struct dsi_panel *panel)
 		panel->oplus_panel.pwm_params.pwm_config = val;
 	}
 
+	panel->oplus_panel.pwm_params.pwm_mode_count = -1;
+	panel->oplus_panel.pwm_params.pwm_pulse_state = PWM_STATE_L2;
+	panel->oplus_panel.pwm_params.pwm_pulse_state_last = PWM_STATE_L2;
+
 	panel->oplus_panel.pwm_params.pwm_compatible_mode = utils->read_bool(utils->data, "oplus,pwm-compatible-mode");
 	OPLUS_PWM_INFO("oplus,pwm-compatible-mode: %s\n", panel->oplus_panel.pwm_params.pwm_compatible_mode ? "true" : "false");
 
@@ -293,67 +343,113 @@ int oplus_panel_parse_pwm_config(struct dsi_panel *panel)
 			INIT_WORK(&panel->oplus_panel.pwm_params.oplus_pwm_dbv_ext_cmd_work, oplus_pwm_dbv_ext_cmd_work_handler);
 		}
 
-		rc = oplus_panel_pwm_parse_states_config(panel, PWM_SWITCH_MODE0);
-		if (rc) {
-			panel->oplus_panel.pwm_params.pwm_config = OPLUS_PWM_SUPPORT;
-			goto end;
+		if (oplus_panel_pwm_mode0_support(panel)) {
+			rc = oplus_panel_pwm_parse_states_config(panel, PWM_SWITCH_MODE0);
+			if (rc) {
+				panel->oplus_panel.pwm_params.pwm_config &= ~OPLUS_PWM_SUPPORT;
+				goto end;
+			}
+			panel->oplus_panel.pwm_params.pwm_mode_count = 1;
 		}
 
 		/* if pwm mode switch support, should parse another mode config */
 		if (oplus_panel_pwm_switch_support(panel)) {
-			rc = oplus_panel_pwm_parse_states_config(panel, PWM_SWITCH_MODE1);
-			if (rc) {
-				OPLUS_PWM_ERR("failed to init pwm_switch mode1, disabled pwm switch feature\n");
-				panel->oplus_panel.pwm_params.pwm_config &= ~OPLUS_PWM_SWITCH_SUPPORT;
-				goto end;
+			if (oplus_panel_pwm_mode1_support(panel)) {
+				rc = oplus_panel_pwm_parse_states_config(panel, PWM_SWITCH_MODE1);
+				if (rc) {
+					OPLUS_PWM_ERR("failed to init pwm_switch mode1, disabled pwm switch feature\n");
+					panel->oplus_panel.pwm_params.pwm_config &= ~OPLUS_PWM_SWITCH_SUPPORT;
+					goto end;
+				}
+				panel->oplus_panel.pwm_params.pwm_mode_count = 2;
 			}
-
-			if (panel->oplus_panel.pwm_params.pwm_compatible_mode) {
+			if (oplus_panel_pwm_mode2_support(panel) || panel->oplus_panel.pwm_params.pwm_compatible_mode) {
 				rc = oplus_panel_pwm_parse_states_config(panel, PWM_SWITCH_MODE2);
 				if (rc) {
 					OPLUS_PWM_ERR("failed to init pwm_switch mode2, disabled pwm switch feature\n");
 					panel->oplus_panel.pwm_params.pwm_config &= ~OPLUS_PWM_SWITCH_SUPPORT;
 					goto end;
 				}
+				panel->oplus_panel.pwm_params.pwm_mode_count = 3;
 			}
 		}
 
 		/* if pwm mode switch support, should parse another mode config */
 		if (oplus_panel_pwm_cmd_replace_enabled(panel)) {
-			raw_cmd_map_count = utils->count_strings(utils->data, "oplus,pwm-cmd-switch-map");
-			if (raw_cmd_map_count <= 0) {
-				OPLUS_PWM_WARN("cmd_switch was configed but oplus,pwm-cmd-switch-map did not specified\n");
-			} else if (raw_cmd_map_count % 2 != 0) {
-				OPLUS_PWM_ERR("invalid format of oplus,pwm-cmd-switch-map!\n");
-			} else {
-				OPLUS_PWM_INFO("pwm cmd replace map count: %d\n", raw_cmd_map_count / 2);
-				rc = of_property_read_string_array(utils->data, "oplus,pwm-cmd-switch-map", cmd_map, raw_cmd_map_count);
-				if (rc < 0) {
-					OPLUS_PWM_ERR("failed to read oplus,pwm-cmd-switch-map, rc=%d\n", rc);
-					panel->oplus_panel.pwm_params.pwm_cmd_replace_map_count = 0;
-					goto end;
+			if (oplus_panel_pwm_mode1_support(panel)) {
+				raw_cmd_map_count = utils->count_strings(utils->data, "oplus,pwm-mode1-cmd-switch-map");
+				if (raw_cmd_map_count <= 0) {
+					OPLUS_PWM_WARN("cmd_switch was configed but oplus,pwm-mode1-cmd-switch-map did not specified\n");
+				} else if (raw_cmd_map_count % 2 != 0) {
+					OPLUS_PWM_ERR("invalid format of oplus,pwm-mode1-cmd-switch-map!\n");
 				} else {
-					for (i = 0; i < raw_cmd_map_count; i += 2) {
-						origin_cmd_index = string_in_array(cmd_map[i], cmd_set_prop_map, DSI_CMD_SET_MAX);
-						replace_cmd_index = string_in_array(cmd_map[i+1], cmd_set_prop_map, DSI_CMD_SET_MAX);
+					OPLUS_PWM_INFO("pwm cmd replace map count: %d\n", raw_cmd_map_count / 2);
+					rc = of_property_read_string_array(utils->data, "oplus,pwm-mode1-cmd-switch-map", cmd_map, raw_cmd_map_count);
+					if (rc < 0) {
+						OPLUS_PWM_ERR("failed to read oplus,pwm-mode1-cmd-switch-map, rc=%d\n", rc);
+						panel->oplus_panel.pwm_params.pwm_mode1_cmd_replace_map_count = 0;
+						goto end;
+					} else {
+						for (i = 0; i < raw_cmd_map_count; i += 2) {
+							origin_cmd_index = string_in_array(cmd_map[i], cmd_set_prop_map, DSI_CMD_SET_MAX);
+							replace_cmd_index = string_in_array(cmd_map[i+1], cmd_set_prop_map, DSI_CMD_SET_MAX);
 
-						if (origin_cmd_index < 0) {
-							OPLUS_PWM_ERR("Invalid name %s of cmd, will disable pwm cmd replace feature\n", cmd_map[i]);
-							goto end;
+							if (origin_cmd_index < 0) {
+								OPLUS_PWM_ERR("Invalid name %s of cmd, will disable pwm cmd replace feature\n", cmd_map[i]);
+								goto end;
+							}
+
+							if (replace_cmd_index < 0) {
+								OPLUS_PWM_ERR("Invalid name %s of cmd, will disable pwm cmd replace feature\n", cmd_map[i+1]);
+								goto end;
+							}
+							panel->oplus_panel.pwm_params.pwm_mode1_cmd_replace_map[0][i / 2] = origin_cmd_index;
+							panel->oplus_panel.pwm_params.pwm_mode1_cmd_replace_map[1][i / 2] = replace_cmd_index;
+
+							OPLUS_PWM_INFO("replace cmd %s to %s while pwm switch on\n",
+								cmd_set_prop_map[panel->oplus_panel.pwm_params.pwm_mode1_cmd_replace_map[0][i / 2]],
+								cmd_set_prop_map[panel->oplus_panel.pwm_params.pwm_mode1_cmd_replace_map[1][i / 2]]);
 						}
-
-						if (replace_cmd_index < 0) {
-							OPLUS_PWM_ERR("Invalid name %s of cmd, will disable pwm cmd replace feature\n", cmd_map[i+1]);
-							goto end;
-						}
-						panel->oplus_panel.pwm_params.pwm_cmd_replace_map[0][i / 2] = origin_cmd_index;
-						panel->oplus_panel.pwm_params.pwm_cmd_replace_map[1][i / 2] = replace_cmd_index;
-
-						OPLUS_PWM_INFO("replace cmd %s to %s while pwm switch on\n",
-							cmd_set_prop_map[panel->oplus_panel.pwm_params.pwm_cmd_replace_map[0][i / 2]],
-							cmd_set_prop_map[panel->oplus_panel.pwm_params.pwm_cmd_replace_map[1][i / 2]]);
+						panel->oplus_panel.pwm_params.pwm_mode1_cmd_replace_map_count = raw_cmd_map_count / 2;
 					}
-					panel->oplus_panel.pwm_params.pwm_cmd_replace_map_count = raw_cmd_map_count / 2;
+				}
+			}
+			if (oplus_panel_pwm_mode2_support(panel)) {
+				raw_cmd_map_count = utils->count_strings(utils->data, "oplus,pwm-mode2-cmd-switch-map");
+				if (raw_cmd_map_count <= 0) {
+					OPLUS_PWM_WARN("cmd_switch was configed but oplus,pwm-mode2-cmd-switch-map did not specified\n");
+				} else if (raw_cmd_map_count % 2 != 0) {
+					OPLUS_PWM_ERR("invalid format of oplus,pwm-mode2-cmd-switch-map!\n");
+				} else {
+					OPLUS_PWM_INFO("pwm cmd replace map count: %d\n", raw_cmd_map_count / 2);
+					rc = of_property_read_string_array(utils->data, "oplus,pwm-mode2-cmd-switch-map", cmd_map, raw_cmd_map_count);
+					if (rc < 0) {
+						OPLUS_PWM_ERR("failed to read oplus,pwm-mode2-cmd-switch-map, rc=%d\n", rc);
+						panel->oplus_panel.pwm_params.pwm_mode2_cmd_replace_map_count = 0;
+						goto end;
+					} else {
+						for (i = 0; i < raw_cmd_map_count; i += 2) {
+							origin_cmd_index = string_in_array(cmd_map[i], cmd_set_prop_map, DSI_CMD_SET_MAX);
+							replace_cmd_index = string_in_array(cmd_map[i+1], cmd_set_prop_map, DSI_CMD_SET_MAX);
+
+							if (origin_cmd_index < 0) {
+								OPLUS_PWM_ERR("Invalid name %s of cmd, will disable pwm cmd replace feature\n", cmd_map[i]);
+								goto end;
+							}
+
+							if (replace_cmd_index < 0) {
+								OPLUS_PWM_ERR("Invalid name %s of cmd, will disable pwm cmd replace feature\n", cmd_map[i+1]);
+								goto end;
+							}
+							panel->oplus_panel.pwm_params.pwm_mode2_cmd_replace_map[0][i / 2] = origin_cmd_index;
+							panel->oplus_panel.pwm_params.pwm_mode2_cmd_replace_map[1][i / 2] = replace_cmd_index;
+
+							OPLUS_PWM_INFO("replace cmd %s to %s while pwm switch on\n",
+								cmd_set_prop_map[panel->oplus_panel.pwm_params.pwm_mode2_cmd_replace_map[0][i / 2]],
+								cmd_set_prop_map[panel->oplus_panel.pwm_params.pwm_mode2_cmd_replace_map[1][i / 2]]);
+						}
+						panel->oplus_panel.pwm_params.pwm_mode2_cmd_replace_map_count = raw_cmd_map_count / 2;
+					}
 				}
 			}
 		}
@@ -436,24 +532,33 @@ void oplus_panel_pwm_cmd_replace_handle(struct dsi_panel *panel, enum dsi_cmd_se
 	if (panel->oplus_panel.pwm_params.pwm_compatible_mode
 			&& oplus_panel_pwm_get_switch_state(panel) == PWM_SWITCH_MODE1) {
 		if (oplus_panel_pwm_get_state(panel) == PWM_STATE_L1) {
-			for (i = 0; i < panel->oplus_panel.pwm_params.pwm_cmd_replace_map_count; i++) {
-				if (panel->oplus_panel.pwm_params.pwm_cmd_replace_map[0][i] == *type) {
-					*type = panel->oplus_panel.pwm_params.pwm_cmd_replace_map[1][i];
+			for (i = 0; i < panel->oplus_panel.pwm_params.pwm_mode2_cmd_replace_map_count; i++) {
+				if (panel->oplus_panel.pwm_params.pwm_mode2_cmd_replace_map[0][i] == *type) {
+					*type = panel->oplus_panel.pwm_params.pwm_mode2_cmd_replace_map[1][i];
 					OPLUS_PWM_INFO("replace cmd %s to %s\n",
-						cmd_set_prop_map[panel->oplus_panel.pwm_params.pwm_cmd_replace_map[0][i]],
-						cmd_set_prop_map[panel->oplus_panel.pwm_params.pwm_cmd_replace_map[1][i]]);
+						cmd_set_prop_map[panel->oplus_panel.pwm_params.pwm_mode2_cmd_replace_map[0][i]],
+						cmd_set_prop_map[panel->oplus_panel.pwm_params.pwm_mode2_cmd_replace_map[1][i]]);
 					break;
 				}
 			}
 		}
-	} else if (oplus_panel_pwm_get_switch_state(panel) == PWM_SWITCH_MODE1
-			|| oplus_panel_pwm_get_switch_state(panel) == PWM_SWITCH_MODE2) {
-		for (i = 0; i < panel->oplus_panel.pwm_params.pwm_cmd_replace_map_count; i++) {
-			if (panel->oplus_panel.pwm_params.pwm_cmd_replace_map[0][i] == *type) {
-				*type = panel->oplus_panel.pwm_params.pwm_cmd_replace_map[1][i];
+	} else if (oplus_panel_pwm_get_switch_state(panel) == PWM_SWITCH_MODE1) {
+		for (i = 0; i < panel->oplus_panel.pwm_params.pwm_mode1_cmd_replace_map_count; i++) {
+			if (panel->oplus_panel.pwm_params.pwm_mode1_cmd_replace_map[0][i] == *type) {
+				*type = panel->oplus_panel.pwm_params.pwm_mode1_cmd_replace_map[1][i];
 				OPLUS_PWM_INFO("replace cmd %s to %s\n",
-					cmd_set_prop_map[panel->oplus_panel.pwm_params.pwm_cmd_replace_map[0][i]],
-					cmd_set_prop_map[panel->oplus_panel.pwm_params.pwm_cmd_replace_map[1][i]]);
+					cmd_set_prop_map[panel->oplus_panel.pwm_params.pwm_mode1_cmd_replace_map[0][i]],
+					cmd_set_prop_map[panel->oplus_panel.pwm_params.pwm_mode1_cmd_replace_map[1][i]]);
+				break;
+			}
+		}
+	} else if (oplus_panel_pwm_get_switch_state(panel) == PWM_SWITCH_MODE2) {
+		for (i = 0; i < panel->oplus_panel.pwm_params.pwm_mode2_cmd_replace_map_count; i++) {
+			if (panel->oplus_panel.pwm_params.pwm_mode2_cmd_replace_map[0][i] == *type) {
+				*type = panel->oplus_panel.pwm_params.pwm_mode2_cmd_replace_map[1][i];
+				OPLUS_PWM_INFO("replace cmd %s to %s\n",
+					cmd_set_prop_map[panel->oplus_panel.pwm_params.pwm_mode2_cmd_replace_map[0][i]],
+					cmd_set_prop_map[panel->oplus_panel.pwm_params.pwm_mode2_cmd_replace_map[1][i]]);
 				break;
 			}
 		}
@@ -1068,7 +1173,7 @@ int oplus_display_panel_get_pwm_pulse(void *data)
 	mutex_unlock(&display->display_lock);
 	OPLUS_PWM_INFO("Get pwm switch state: %d\n", *mode);
 
-	return rc;
+	return panel->oplus_panel.pwm_params.pwm_mode_count;
 }
 
 int oplus_display_panel_set_pwm_pulse(void *data)
@@ -1092,8 +1197,20 @@ int oplus_display_panel_set_pwm_pulse(void *data)
 		return rc;
 	}
 
-	if (panel->power_mode == SDE_MODE_DPMS_OFF) {
-		OPLUS_PWM_WARN("Skip set pwm switch, because display panel is off\n");
+	if (panel->power_mode != SDE_MODE_DPMS_ON) {
+		OPLUS_PWM_WARN("Skip set pwm switch, because display panel isn't power on\n");
+		rc = -EFAULT;
+		return rc;
+	}
+
+	if (*mode >= panel->oplus_panel.pwm_params.pwm_mode_count) {
+		OPLUS_PWM_ERR("unsupport mode: %u\n", *mode);
+		rc = -EFAULT;
+		return rc;
+	}
+
+	if (!((panel->oplus_panel.pwm_params.pwm_config >> OPLUS_PWM_MODE) & BIT(*mode))) {
+		OPLUS_PWM_INFO("unsupport pwm mode: %u\n", *mode);
 		rc = -EFAULT;
 		return rc;
 	}
@@ -1175,8 +1292,8 @@ ssize_t oplus_set_pwm_pulse_debug(struct kobject *obj,
 		return rc;
 	}
 
-	if (panel->power_mode == SDE_MODE_DPMS_OFF) {
-		OPLUS_PWM_WARN("Skip set pwm switch, because display panel is off\n");
+	if (panel->power_mode != SDE_MODE_DPMS_ON) {
+		OPLUS_PWM_WARN("Skip set pwm switch, because display panel isn't power on\n");
 		rc = -EFAULT;
 		return rc;
 	}
@@ -1187,6 +1304,18 @@ ssize_t oplus_set_pwm_pulse_debug(struct kobject *obj,
 		return count;
 	}
 	OPLUS_PWM_INFO("Set pwm onepulse status: %d\n", mode);
+
+	if (mode >= panel->oplus_panel.pwm_params.pwm_mode_count) {
+		OPLUS_PWM_ERR("unsupport mode: %u\n", mode);
+		rc = -EFAULT;
+		return rc;
+	}
+
+	if (!((panel->oplus_panel.pwm_params.pwm_config >> OPLUS_PWM_MODE) & BIT(mode))) {
+		OPLUS_PWM_INFO("unsupport pwm mode: %u\n", mode);
+		rc = -EFAULT;
+		return rc;
+	}
 
 	mutex_lock(&display->display_lock);
 	oplus_panel_update_pwm_pulse_lock(panel, mode);

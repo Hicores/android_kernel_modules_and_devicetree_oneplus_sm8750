@@ -4706,6 +4706,8 @@ int oplus_chg_parse_charger_dt(struct oplus_chg_chip *chip)
 		return -EINVAL;
 	}
 
+	chip->full_limit_curr_support = of_property_read_bool(node, "oplus,full_limit_curr_support");
+
 	rc = of_property_read_u32(node, "qcom,input_current_charger_ma", &chip->limits.input_current_charger_ma);
 	if (rc) {
 		chip->limits.input_current_charger_ma = OPCHG_INPUT_CURRENT_LIMIT_CHARGER_MA;
@@ -10008,6 +10010,11 @@ static void battery_notify_fastchg_check(struct oplus_chg_chip *chip)
 
 	if (!chip)
 		return;
+
+	if (!chip->mmi_chg) {
+		chg_debug("mmi_chg disable chg\n");
+		return;
+	}
 
 	if (chip->non_standard_chg_switch <= 0) {
 		chg_debug("RUS switch control %d\n", chip->non_standard_chg_switch);

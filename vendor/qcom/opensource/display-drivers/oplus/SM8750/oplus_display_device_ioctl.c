@@ -1912,6 +1912,12 @@ int oplus_display_panel_set_hbm_max(void *data)
 		return rc;
 	}
 
+	if (!strcmp(panel->name, "P 3 AE035 dsc cmd mode panel")) {
+		if (panel->oplus_panel.pwm_params.pwm_switch_state) {
+			OPLUS_DSI_INFO("onepulse mode don't support apl");
+			return rc;
+		}
+	}
 	OPLUS_DSI_INFO("Set hbm max state=%d\n", hbm_max_state);
 
 	mutex_lock(&display->display_lock);

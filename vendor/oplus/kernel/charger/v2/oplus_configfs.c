@@ -2715,17 +2715,16 @@ static void oplus_configfs_plc_enable_work(struct work_struct *work)
 	if (!chip->plc_user_enable || !chip->wired_online)
 		return;
 
-	if (chip->plc_status != PLC_STATUS_DISABLE)
-		goto err;
+	if (chip->plc_status == PLC_STATUS_NOT_ALLOW) {
+		chip->plc_user_enable = false;
+		chg_err("status not allow, change plc_user_enable to false\n");
+		return;
+	}
 
 	chg_info("enable plc by kernel\n");
 	rc = oplus_chg_plc_enable(chip->plc_topic, true);
 	if (rc < 0)
 		chg_err("plc enable error, rc=%d\n", rc);
-	return;
-
-err:
-	chip->plc_user_enable = false;
 }
 
 #define CLEAN_PLC_ENABLE_DELAY_MS 1600
@@ -2737,6 +2736,9 @@ static void oplus_configfs_clean_plc_enable_work(struct work_struct *work)
 	if (!chip->wired_online) {
 		chip->plc_user_enable = false;
 		chg_info("offline, change plc_user_enable to false\n");
+	} else if (!chip->retention_state) {
+		chip->plc_user_enable = false;
+		chg_info("retention_state[false], change plc_user_enable to false\n");
 	}
 }
 
@@ -4143,7 +4145,7 @@ static void oplus_configfs_wired_subs_callback(struct mms_subscribe *subs,
 			chip->wired_online = data.intval;
 			if (!chip->wired_online) {
 				schedule_work(&chip->eis_reset_work);
-				if (chip->plc_user_enable) {
+				if (chip->plc_topic && chip->plc_user_enable) {
 					cancel_delayed_work(&chip->clean_plc_enable_work);
 					schedule_delayed_work(&chip->clean_plc_enable_work,
 						msecs_to_jiffies(CLEAN_PLC_ENABLE_DELAY_MS));
@@ -4586,7 +4588,7 @@ static void oplus_configfs_retention_subs_callback(struct mms_subscribe *subs,
 		case RETENTION_ITEM_CONNECT_STATUS:
 			oplus_mms_get_item_data(chip->retention_topic, id, &data, false);
 			chip->retention_state = data.intval;
-			if (chip->plc_user_enable && chip->retention_state) {
+			if (chip->plc_topic && chip->plc_user_enable && chip->retention_state) {
 				cancel_delayed_work(&chip->plc_enable_work);
 				schedule_delayed_work(&chip->plc_enable_work, msecs_to_jiffies(PLC_ENABLE_DELAY_MS));
 			}

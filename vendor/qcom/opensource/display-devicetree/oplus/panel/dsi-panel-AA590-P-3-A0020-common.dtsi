@@ -53,7 +53,7 @@
                 qcom,mdss-dsi-pwm-switch-mode2-panel-on-command-state = "dsi_hs_sync1_mode";
                 qcom,mdss-dsi-pwm-switch-mode0-command-state = "dsi_hs_sync1_mode";
                 qcom,mdss-dsi-pwm-switch-mode2-command-state = "dsi_hs_sync2_mode";
-                qcom,mdss-dsi-timming-pwm-switch-onepulse-command-state = "dsi_hs_sync1_mode";
+                qcom,mdss-dsi-timming-switch-pwm-mode2-command-state = "dsi_hs_sync1_mode";
                 qcom,mdss-dsi-pwm-switch-onepulse-command-state = "dsi_hs_sync1_mode";
 
                 qcom,mdss-dsi-pwm-state-l2tol3-command-state = "dsi_hs_sync1_mode";

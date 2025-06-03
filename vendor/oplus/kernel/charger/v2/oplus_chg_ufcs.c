@@ -458,6 +458,7 @@ struct oplus_ufcs {
 	unsigned int err_flag;
 	bool ufcs_online;
 	bool ufcs_charging;
+	bool handshake_ok;
 	bool adapter_check_third_ufcs;
 	int retention_ufcs_power;
 	bool oplus_ufcs_adapter;
@@ -1883,6 +1884,7 @@ static void oplus_ufcs_force_exit(struct oplus_ufcs *chip)
 	chip->power_imax = 0;
 	oplus_ufcs_cp_set_work_start(chip, false);
 	oplus_ufcs_exit_ufcs_mode(chip);
+	chip->handshake_ok = false;
 	msleep(UFCS_STOP_DELAY_TIME);
 	oplus_ufcs_cp_enable(chip, false);
 	oplus_ufcs_cp_adc_enable(chip, false);
@@ -1910,6 +1912,7 @@ static void oplus_ufcs_soft_exit(struct oplus_ufcs *chip)
 	chip->startup_retry_times = 0;
 	oplus_ufcs_cp_set_work_start(chip, false);
 	oplus_ufcs_exit_ufcs_mode(chip);
+	chip->handshake_ok = false;
 	msleep(UFCS_STOP_DELAY_TIME);
 	oplus_ufcs_cp_enable(chip, false);
 	oplus_ufcs_cp_adc_enable(chip, false);
@@ -2237,6 +2240,11 @@ static void oplus_ufcs_switch_check_work(struct work_struct *work)
 	bool ufcs_boot_retry = false;
 	union mms_msg_data msg_data = { 0 };
 
+	if (chip->handshake_ok) {
+		chg_info("handshake_ok is true, exit\n");
+		return;
+	}
+
 	chg_info("ufcs_switch_check_work\n");
 	oplus_ufcs_set_charging(chip, false);
 	rc = oplus_cpa_switch_start(chip->cpa_topic, CHG_PROTOCOL_UFCS);
@@ -2281,6 +2289,7 @@ static void oplus_ufcs_switch_check_work(struct work_struct *work)
 		}
 		goto err;
 	}
+	chip->handshake_ok = true;
 	chg_info("ufcs handshake success\n");
 
 	rc = oplus_ufcs_get_dev_info(chip, &chip->dev_info);
@@ -2464,6 +2473,7 @@ next:
 	return;
 
 exit:
+	chip->handshake_ok = false;
 	oplus_ufcs_exit_ufcs_mode(chip);
 	chip->cp_work_mode = CP_WORK_MODE_UNKNOWN;
 	chip->cp_ratio = 0;
@@ -3449,8 +3459,10 @@ static void oplus_ufcs_check_low_curr_full(struct oplus_ufcs *chip)
 static void oplus_ufcs_check_timeout(struct oplus_ufcs *chip)
 {
 	unsigned long tmp_time;
-	if (chip->plc_status == PLC_STATUS_ENABLE)
+	if (chip->plc_status == PLC_STATUS_ENABLE) {
+		chip->timer.monitor_jiffies = jiffies;
 		return;
+	}
 	tmp_time = jiffies - chip->timer.monitor_jiffies;
 	chip->timer.monitor_jiffies = jiffies;
 	if (chip->timer.ufcs_max_time_ms <= jiffies_to_msecs(tmp_time)) {
@@ -4332,6 +4344,8 @@ static void oplus_ufcs_current_work(struct work_struct *work)
 		} else {
 			curr_set = min(chip->target_curr_ma, get_client_vote(chip->ufcs_curr_votable, BASE_MAX_VOTER));
 		}
+		if (curr_set <= PLC_IBUS_DEFAULT)
+			curr_set = PLC_IBUS_DEFAULT;
 	}
 
 	chg_info("[%d, %d][%d, %d, %d, %d]\n", curr_set, chip->target_vbus_mv, curr_cc, chip->target_curr_ma, chip->curr_set_ma, chip->vol_set_mv);
@@ -6760,6 +6774,7 @@ static int oplus_ufcs_event_notifier_call(struct notifier_block *nb, unsigned lo
 	switch (val) {
 	case UFCS_NOTIFY_SOURCE_HW_RESET:
 		chg_info("source hard reset\n");
+		chip->handshake_ok = false;
 		schedule_work(&chip->force_exit_work);
 		break;
 	case UFCS_NOTIFY_CABLE_HW_RESET:
@@ -6770,6 +6785,7 @@ static int oplus_ufcs_event_notifier_call(struct notifier_block *nb, unsigned lo
 		break;
 	case UFCS_NOTIFY_EXIT:
 		chg_info("exit ufcs mode\n");
+		chip->handshake_ok = false;
 		schedule_work(&chip->soft_exit_work);
 		if (v != NULL && (*(int *)v == UFCS_NOTIFY_EXIT_BY_CRASH)) {
 			chip->prot_crash = true;
@@ -6958,6 +6974,7 @@ static int oplus_ufcs_probe(struct platform_device *pdev)
 	chip->dev = &pdev->dev;
 	platform_set_drvdata(pdev, chip);
 	chip->reset_adapter = false;
+	chip->handshake_ok = false;
 	init_completion(&chip->reset_abnormal_ack);
 
 	oplus_ufcs_parse_dt(chip);

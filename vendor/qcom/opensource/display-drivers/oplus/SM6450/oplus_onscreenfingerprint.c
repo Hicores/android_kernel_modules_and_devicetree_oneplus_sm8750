@@ -3788,6 +3788,11 @@ int oplus_ofp_notify_fp_press(void *buf)
 		oplus_ofp_aod_off_set();
 	}
 
+	if (p_oplus_ofp_params->fp_press && p_oplus_ofp_params->doze_active
+			&& oplus_ofp_optical_new_solution_is_enabled()) {
+		oplus_ofp_aod_unlocking_update();
+	}
+
 	OPLUS_OFP_TRACE_END("oplus_ofp_notify_fp_press");
 
 	OFP_DEBUG("end\n");

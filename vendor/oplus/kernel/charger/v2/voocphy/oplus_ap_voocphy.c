@@ -5613,7 +5613,7 @@ static int oplus_voocphy_safe_event_handle(struct device *dev, unsigned long dat
 	}
 
 	if (chip->plc_status == PLC_STATUS_ENABLE)
-		return status;
+		return oplus_voocphy_monitor_timer_start(chip, VOOC_THREAD_TIMER_SAFE, VOOC_SAFE_EVENT_TIME);
 
 	if (chip->fastchg_timeout_time)
 		chip->fastchg_timeout_time--;

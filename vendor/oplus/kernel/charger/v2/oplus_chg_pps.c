@@ -2587,8 +2587,10 @@ static void oplus_pps_check_timeout(struct oplus_pps *chip)
 {
 	unsigned long tmp_time;
 
-	if (chip->plc_status == PLC_STATUS_ENABLE)
+	if (chip->plc_status == PLC_STATUS_ENABLE) {
+		chip->timer.monitor_jiffies = jiffies;
 		return;
+	}
 
 	tmp_time = jiffies - chip->timer.monitor_jiffies;
 	chip->timer.monitor_jiffies = jiffies;

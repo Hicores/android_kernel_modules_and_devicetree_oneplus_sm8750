@@ -786,7 +786,7 @@
 					15 00 00 40 00 00 02 38 00
 					39 00 00 00 00 00 05 51 00 00 00 00
 				];
-				qcom,mdss-dsi-aod-off-1pulse-command = [
+				qcom,mdss-dsi-aod-off-pwm-mode2-command = [
 					39 00 00 40 00 00 04 FF 5A A5 4F
 					15 00 00 40 00 00 02 88 78
 					39 00 00 40 00 00 04 FF 5A A5 01
@@ -1117,7 +1117,7 @@
 					15 00 00 40 00 00 02 F0 00
 					39 00 00 00 00 00 04 FF 5A A5 00
 				];
-				qcom,mdss-dsi-timming-pwm-switch-onepulse-command = [
+				qcom,mdss-dsi-timming-switch-pwm-mode2-command = [
 					39 00 00 40 00 00 04 FF 5A A5 00
 					15 00 00 40 00 00 02 60 01
 					39 00 00 40 00 00 04 FF 5A A5 2D
@@ -1331,7 +1331,7 @@
 				];
 				qcom,mdss-dsi-lp1-command-state = "dsi_hs_sync1_mode";
 				qcom,mdss-dsi-nolp-command-state = "dsi_hs_sync1_mode";
-				qcom,mdss-dsi-aod-off-1pulse-command-state = "dsi_hs_sync1_mode";
+				qcom,mdss-dsi-aod-off-pwm-mode2-command-state = "dsi_hs_sync1_mode";
 				qcom,mdss-dsi-aod-off-compensation-command-state = "dsi_lp_sync1_mode";
 				qcom,mdss-dsi-aod-off-compensation-onepulse-command-state = "dsi_lp_sync1_mode";
 				qcom,mdss-dsi-nolp-hpwm-command-state = "dsi_lp_sync1_mode";
@@ -2101,7 +2101,7 @@
 					15 00 00 40 00 00 02 38 00
 					39 00 00 00 00 00 05 51 00 00 00 00
 				];
-				qcom,mdss-dsi-aod-off-1pulse-command = [
+				qcom,mdss-dsi-aod-off-pwm-mode2-command = [
 					39 00 00 40 00 00 04 FF 5A A5 4F
 					15 00 00 40 00 00 02 88 78
 					39 00 00 40 00 00 04 FF 5A A5 01
@@ -2428,7 +2428,7 @@
 					15 00 00 40 00 00 02 F0 00
 					39 00 00 00 00 00 04 FF 5A A5 00
 				];
-				qcom,mdss-dsi-timming-pwm-switch-onepulse-command = [
+				qcom,mdss-dsi-timming-switch-pwm-mode2-command = [
 					39 00 00 40 00 00 04 FF 5A A5 00
 					15 00 00 40 00 00 02 60 03
 					39 00 00 40 00 00 04 FF 5A A5 2D
@@ -2657,7 +2657,7 @@
 				];
 				qcom,mdss-dsi-lp1-command-state = "dsi_hs_sync1_mode";
 				qcom,mdss-dsi-nolp-command-state = "dsi_hs_sync1_mode";
-				qcom,mdss-dsi-aod-off-1pulse-command-state = "dsi_hs_sync1_mode";
+				qcom,mdss-dsi-aod-off-pwm-mode2-command-state = "dsi_hs_sync1_mode";
 				qcom,mdss-dsi-aod-off-compensation-command-state = "dsi_lp_sync1_mode";
 				qcom,mdss-dsi-aod-off-compensation-onepulse-command-state = "dsi_lp_sync1_mode";
 				qcom,mdss-dsi-nolp-hpwm-command-state = "dsi_lp_sync1_mode";
@@ -3430,7 +3430,7 @@
 					15 00 00 40 00 00 02 38 00
 					39 00 00 00 00 00 05 51 00 00 00 00
 				];
-				qcom,mdss-dsi-aod-off-1pulse-command = [
+				qcom,mdss-dsi-aod-off-pwm-mode2-command = [
 					39 00 00 40 00 00 04 FF 5A A5 4F
 					15 00 00 40 00 00 02 88 78
 					39 00 00 40 00 00 04 FF 5A A5 01
@@ -3761,7 +3761,7 @@
 					15 00 00 40 00 00 02 F0 00
 					39 00 00 00 00 00 04 FF 5A A5 00
 				];
-				qcom,mdss-dsi-timming-pwm-switch-onepulse-command = [
+				qcom,mdss-dsi-timming-switch-pwm-mode2-command = [
 					39 00 00 40 00 00 04 FF 5A A5 00
 					15 00 00 40 00 00 02 60 01
 					39 00 00 40 00 00 04 FF 5A A5 2D
@@ -3975,7 +3975,7 @@
 				];
 				qcom,mdss-dsi-lp1-command-state = "dsi_hs_sync1_mode";
 				qcom,mdss-dsi-nolp-command-state = "dsi_hs_sync1_mode";
-				qcom,mdss-dsi-aod-off-1pulse-command-state = "dsi_hs_sync1_mode";
+				qcom,mdss-dsi-aod-off-pwm-mode2-command-state = "dsi_hs_sync1_mode";
 				qcom,mdss-dsi-aod-off-compensation-command-state = "dsi_lp_sync1_mode";
 				qcom,mdss-dsi-aod-off-compensation-onepulse-command-state = "dsi_lp_sync1_mode";
 				qcom,mdss-dsi-nolp-hpwm-command-state = "dsi_lp_sync1_mode";
@@ -4743,7 +4743,7 @@
 					15 00 00 40 00 00 02 38 00
 					39 00 00 00 00 00 05 51 00 00 00 00
 				];
-				qcom,mdss-dsi-aod-off-1pulse-command = [
+				qcom,mdss-dsi-aod-off-pwm-mode2-command = [
 					39 00 00 40 00 00 04 FF 5A A5 4F
 					15 00 00 40 00 00 02 88 78
 					39 00 00 40 00 00 04 FF 5A A5 01
@@ -5074,7 +5074,7 @@
 					15 00 00 40 00 00 02 F0 00
 					39 00 00 00 00 00 04 FF 5A A5 00
 				];
-				qcom,mdss-dsi-timming-pwm-switch-onepulse-command = [
+				qcom,mdss-dsi-timming-switch-pwm-mode2-command = [
 					39 00 00 40 00 00 04 FF 5A A5 00
 					15 00 00 40 00 00 02 60 01
 					39 00 00 40 00 00 04 FF 5A A5 2D
@@ -5288,7 +5288,7 @@
 				];
 				qcom,mdss-dsi-lp1-command-state = "dsi_hs_sync1_mode";
 				qcom,mdss-dsi-nolp-command-state = "dsi_hs_sync1_mode";
-				qcom,mdss-dsi-aod-off-1pulse-command-state = "dsi_hs_sync1_mode";
+				qcom,mdss-dsi-aod-off-pwm-mode2-command-state = "dsi_hs_sync1_mode";
 				qcom,mdss-dsi-aod-off-compensation-command-state = "dsi_lp_sync1_mode";
 				qcom,mdss-dsi-aod-off-compensation-onepulse-command-state = "dsi_lp_sync1_mode";
 				qcom,mdss-dsi-nolp-hpwm-command-state = "dsi_lp_sync1_mode";
@@ -6028,8 +6028,12 @@
 		Bit6: sending extend cmd while panel power on accroding to current pwm mode
 		Bit7: sending extend cmd while timing switch accroding to current pwm pulse level
 		Bit8: sending extend cmd after sending dbv threshold cmd in another thread
+		...
+		Bit24:support pwm mode0
+		Bit25:support pwm mode1
+		Bit26:support pwm mode2
 	*/
-	oplus,pwm-switch-config = <0x7F>;
+	oplus,pwm-switch-config = <0x0700007F>;
 	/*	oplus,pwm-switch-mode0-states-info/oplus,pwm-switch-mode1-states-info:
 		Specific dbv threshold and pulse info of 2 pwm mode, for pulse, 0 symbols 1pulse,
 		1symbols 3pulse and 2 symbols 18pulse. The format should be 1 dbv threshold info with
@@ -6039,13 +6043,13 @@
 	oplus,pwm-switch-mode0-states-info = <2 1162 1>;
 	oplus,pwm-switch-mode1-states-info = <2 1162 0>;
 	oplus,pwm-switch-mode2-states-info = <0>;
-	/*	oplus,pwm-cmd-switch-map:
+	/*	oplus,pwm-mode1-cmd-switch-map/oplus,pwm-mode2-cmd-switch-map;
 		Specific cmd replace relationship while in switch on(1pulse) mode. It is a string array that
 		compose with cmd names, every 2 names combine 1 map. For example, map "'a', 'b'" means replace
 		a to b while sending a in switch on mode.
 	*/
-	oplus,pwm-cmd-switch-map = "qcom,mdss-dsi-nolp-command", "qcom,mdss-dsi-aod-off-1pulse-command",
-			"qcom,mdss-dsi-timing-switch-command", "qcom,mdss-dsi-timming-pwm-switch-onepulse-command";
+	oplus,pwm-mode2-cmd-switch-map = "qcom,mdss-dsi-nolp-command", "qcom,mdss-dsi-aod-off-pwm-mode2-command",
+			"qcom,mdss-dsi-timing-switch-command", "qcom,mdss-dsi-timming-switch-pwm-mode2-command";
 
 	oplus,pwm-compatible-mode;
 	oplus,cmdq-sync-support;

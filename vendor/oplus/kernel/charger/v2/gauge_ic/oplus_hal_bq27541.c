@@ -1886,29 +1886,30 @@ static void bq27541_fcc_too_small_check_work(struct work_struct *work)
 	struct chip_bq27541 *chip = container_of(
 		work, struct chip_bq27541, fcc_too_small_check_work);
 
-	if (chip->batt_bq28z610) {
-		ret = bq28z610_get_true_fcc(chip, &true_fcc);
-		if (!ret && (true_fcc > 200)) /* TODO: true_fcc value is more than 200 */
-			bq28z610_set_fcc_sync(chip);
-	}
+
+	ret = bq28z610_get_true_fcc(chip, &true_fcc);
+	if (!ret && (true_fcc > 200)) /* TODO: true_fcc value is more than 200 */
+		bq28z610_set_fcc_sync(chip);
 
 	chip->fcc_too_small_checking = false;
 }
 
 static void bq27541_fcc_too_small_check(struct chip_bq27541 *chip, int fcc)
 {
-	if (!chip || !chip->fcc_too_small_check_support)
+	if (!chip)
 		return;
 
-	if (chip->fcc_too_small_checking) {
-		chg_info("fcc too small checking, ignore this time");
-		return;
-	}
+	if (chip->batt_bq28z610 && !chip->batt_zy0603) {
+		if (chip->fcc_too_small_checking) {
+			chg_info("fcc too small checking, ignore this time");
+			return;
+		}
 
-	/* TODO: fcc value is less than 200 */
-	if (fcc < 200) {
-		chip->fcc_too_small_checking = true;
-		schedule_work(&chip->fcc_too_small_check_work);
+		/* TODO: fcc value is less than 200 */
+		if (fcc < 200) {
+			chip->fcc_too_small_checking = true;
+			schedule_work(&chip->fcc_too_small_check_work);
+		}
 	}
 }
 
@@ -3942,8 +3943,7 @@ static void bq27541_parse_dt(struct chip_bq27541 *chip)
 {
 	struct device_node *node = chip->dev->of_node;
 	int rc = 0;
-	chip->fcc_too_small_check_support =
-		of_property_read_bool(node, "oplus,fcc_too_small_check_support");
+
 	chip->calib_info_save_support =
 		of_property_read_bool(node, "oplus,calib_info_save_support");
 	chip->modify_soc_smooth =
