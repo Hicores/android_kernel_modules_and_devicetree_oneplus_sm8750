@@ -717,6 +717,7 @@ struct oplus_chg_wls {
 	int magcvr_update_complete;
 
 	int wls_notify;
+	int callname;
 };
 
 struct wls_adapter_curve_step {
@@ -4955,6 +4956,77 @@ static int oplus_chg_wls_get_max_wireless_power(struct oplus_chg_wls *wls_dev)
 	return max_wls_power;
 }
 #endif /* OPLUS_CHG_DEBUG */
+
+#define CLIENT_STR_LEN		32
+#define PARAMETER_NUM		2
+#define RX_DISABLE		1
+#define RX_ENABLE		0
+#define CALL_NAME_BATTERY	2
+#define CALL_NAME_TEST		5
+ssize_t oplus_chg_wls_rx_disable_show(struct oplus_mms *mms, char *buf)
+{
+	struct oplus_chg_wls *wls_dev = NULL;
+	char client_name[CLIENT_STR_LEN] = { '\0' };
+	int rx_status = 0;
+
+	if (!buf) {
+		chg_err("buf is NULL\n");
+		return -EINVAL;
+	}
+	if (!mms) {
+		chg_err("mms is NULL\n");
+		return -ENODEV;
+	}
+
+	wls_dev = oplus_mms_get_drvdata(mms);
+	snprintf(client_name, CLIENT_STR_LEN - 1, "CALL_NAME_%d", wls_dev->callname);
+	rx_status = is_client_vote_enabled(wls_dev->rx_disable_votable, client_name);
+
+	return sprintf(buf, "callname=%d:%d\n", wls_dev->callname, rx_status);
+}
+
+ssize_t oplus_chg_wls_rx_disable_store(struct oplus_mms *mms, const char *buf, size_t count)
+{
+	struct oplus_chg_wls *wls_dev = NULL;
+	char client_name[CLIENT_STR_LEN] = { '\0' };
+	int config = -1;
+	int callname = 0;
+
+	if (!buf) {
+		chg_err("buf is NULL\n");
+		return -EINVAL;
+	}
+	if (!mms) {
+		chg_err("mms is NULL\n");
+		return -ENODEV;
+	}
+
+	wls_dev = oplus_mms_get_drvdata(mms);
+	if (sscanf(buf, "disable=%dcallname=%d", &config, &callname) != PARAMETER_NUM) {
+		chg_err("buf format error\n");
+		return -EINVAL;
+	}
+
+	if (config != RX_ENABLE && config != RX_DISABLE) {
+		chg_err("[disable=%d] is not support!\n", config);
+		return -EINVAL;
+	}
+
+	switch (callname) {
+	case CALL_NAME_BATTERY:
+	case CALL_NAME_TEST:
+		wls_dev->callname = callname;
+		snprintf(client_name, CLIENT_STR_LEN - 1, "CALL_NAME_%d", wls_dev->callname);
+		break;
+	default:
+		chg_info("[callname=%d] is not support!\n", callname);
+		return -EINVAL;
+	}
+
+	vote(wls_dev->rx_disable_votable, client_name, (config == RX_DISABLE) ? true : false, config, false);
+
+	return count;
+}
 
 static int oplus_chg_wls_mms_update_project_power(struct oplus_mms *mms, union mms_msg_data *data)
 {

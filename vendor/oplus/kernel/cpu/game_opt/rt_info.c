@@ -15,6 +15,8 @@
 
 #include "game_ctrl.h"
 
+#include "task_boost/heavy_task_boost.h"
+#include "critical_task_boost.h"
 /*
  * render related thread wake information
  */
@@ -162,6 +164,7 @@ static void try_to_wake_up_success_hook(void *unused, struct task_struct *task)
 unlock:
 		write_unlock(&rt_info_rwlock);
 	}
+	heavy_task_boost(task, related_threads, total_num);
 }
 
 /*
@@ -186,6 +189,7 @@ static int cmp_task_wake_count(const void *a, const void *b)
 
 static int rt_info_show(struct seq_file *m, void *v)
 {
+	reset_critical_task_time();
 	int i, result_num, gl_num;
 	struct render_related_thread *results;
 	char *page;
@@ -384,6 +388,30 @@ static void register_rt_info_vendor_hooks(void)
 {
 	/* Register vender hook in kernel/sched/core.c */
 	register_trace_android_rvh_try_to_wake_up_success(try_to_wake_up_success_hook, NULL);
+}
+
+int get_critical_task_state(const char *name, pid_t pid)
+{
+	if (total_num <= 0 || atomic_read(&have_valid_render_pid) == 0) {
+		return -1;
+	}
+	struct task_struct *task = NULL;
+	int name_len = strlen(name);
+	for (int i = 0; i < total_num; i++) {
+		if (strncmp(name, related_threads[i].task->comm, name_len) == 0) {
+			task = related_threads[i].task;
+			break;
+		}
+	}
+	if (task == NULL || task_pid_nr(task) != pid) {
+		return -1;
+	}
+
+	if (task_is_running(task)) {
+		return 0;
+	} else {
+		return 1;
+	}
 }
 
 int rt_info_init(void)

@@ -2571,8 +2571,13 @@ int kgsl_active_count_wait(struct kgsl_device *device, int count,
 int kgsl_pwrctrl_set_default_gpu_pwrlevel(struct kgsl_device *device)
 {
 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
-	unsigned int new_level = pwr->default_pwrlevel;
-	unsigned int old_level = pwr->active_pwrlevel;
+	unsigned int new_level = (pwr->active_pwrlevel + pwr->default_pwrlevel)/2;
+	unsigned int old_level = pwr->previous_pwrlevel;
+
+	if (new_level > pwr->default_pwrlevel) {
+		new_level = pwr->default_pwrlevel;
+		old_level = pwr->active_pwrlevel;
+	}
 
 	/*
 	 * Update the level according to any thermal,

@@ -37,6 +37,11 @@
 #if defined(CONFIG_ALLOC_ADJUST_FLAGS) || defined(CONFIG_ALLOC_ORDER_STAT) \
 	|| defined(CONFIG_KSWAPS_LOAD_STAT) || defined(CONFIG_COSTLY_ALLOC_MASK_RECLAIM)
 #define KBUF_LEN 10
+
+#if defined(CONFIG_QCOM_ALLOC_MASK_RECLAIM)
+#define QCOM_ALLOC_MASK_RECLAIM_ORDER 4
+#endif
+
 static bool is_digit_str(const char *str)
 {
 	return strspn(str, "0123456789") == strlen(str);
@@ -582,7 +587,11 @@ static void mask_reclaim(void *data, gfp_t *alloc_gfp, unsigned int order)
 	if (!static_branch_likely(&costly_alloc_mask_reclaim))
 		return;
 
+#if defined(CONFIG_QCOM_ALLOC_MASK_RECLAIM)
+	if (likely(order <= QCOM_ALLOC_MASK_RECLAIM_ORDER))
+#else
 	if (likely(order <= PAGE_ALLOC_COSTLY_ORDER))
+#endif
 		return;
 
 	*alloc_gfp &= ~__GFP_RECLAIM;

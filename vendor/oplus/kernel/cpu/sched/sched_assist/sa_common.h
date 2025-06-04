@@ -244,6 +244,7 @@ extern int global_debug_enabled;
 extern int global_sched_assist_enabled;
 extern int global_sched_assist_scene;
 extern int global_silver_perf_core;
+extern int global_sched_group_enabled;
 
 struct rq;
 
@@ -260,6 +261,7 @@ struct sched_assist_locking_ops {
 	void (*check_preempt_wakeup)(struct rq *rq, struct task_struct *p, bool *preempt, bool *nopreempt);
 	void (*state_systrace_c)(unsigned int cpu, struct task_struct *p);
 	void (*locking_tick_hit)(struct task_struct *prev, struct task_struct *next);
+	void (*opt_ss_lock_contention)(struct task_struct *p, int old_im, int new_im);
 };
 
 extern struct sched_assist_locking_ops *locking_ops;
@@ -641,6 +643,7 @@ ssize_t oplus_show_cpus(const struct cpumask *mask, char *buf);
 void adjust_rt_lowest_mask(struct task_struct *p, struct cpumask *local_cpu_mask, int ret, bool force_adjust);
 bool sa_skip_rt_sync(struct rq *rq, struct task_struct *p, bool *sync);
 bool sa_rt_skip_ux_cpu(int cpu);
+int is_vip_mvp(struct task_struct *p);
 
 /* s64 account_ux_runtime(struct rq *rq, struct task_struct *curr); */
 void opt_ss_lock_contention(struct task_struct *p, unsigned long old_im, int new_im);
@@ -675,6 +678,10 @@ void android_rvh_set_cpus_allowed_by_task_handler(void *unused, const struct cpu
 void android_rvh_setscheduler_handler(void *unused, struct task_struct *p);
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_BAN_APP_SET_AFFINITY)
 void android_vh_sched_setaffinity_early_handler(void *unused, struct task_struct *task, const struct cpumask *new_mask, bool *skip);
+#endif
+
+#ifdef CONFIG_OPLUS_SCHED_GROUP_OPT
+void android_vh_reweight_entity_handler(void *unused, struct sched_entity *se);
 #endif
 
 #ifdef CONFIG_BLOCKIO_UX_OPT
