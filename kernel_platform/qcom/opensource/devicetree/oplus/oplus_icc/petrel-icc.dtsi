@@ -1,4 +1,5 @@
 //#ifdef OPLUS_FEATURE_ICC
+/* huo.chen@RF.WIRELESS, 2024/04/01, add for ICC MCU */
 &pm8550_gpios {
   icc_bypass_gpio_default: icc_bypass_gpio_default {
       pins = "gpio2";
@@ -173,4 +174,4 @@
     spi13 = "/soc/qcom,qupv3_2_geni_se@8c0000/spi@894000";
 };
 //#endif /* ifdef OPLUS_FEATURE_ICC */
-//#endif
+//#endif /* huo.chen@RF.WIRELESS, 2024/04/01, add for ICC MCU */

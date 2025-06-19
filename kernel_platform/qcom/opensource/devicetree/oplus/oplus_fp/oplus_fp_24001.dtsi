@@ -1,5 +1,6 @@
 &soc {
 	// #ifdef OPLUS_FEATURE_UFF_FINGERPRINT
+	/* niumeng@BSP.Biometrics.Fingerprint, 2024/03/12, add for fingerprint */
 	fingerprint_dev {
 		status = "ok";
 		compatible = "oplus,fp_spi";
@@ -26,6 +27,7 @@
 
 &tlmm {
 	// #ifdef OPLUS_FEATURE_UFF_FINGERPRINT
+	/* niumeng@BSP.Biometrics.Fingerprint, 2024/03/12, add for fingerprint */
 	fingerprint_dev{
 		fp_irq_gpio_default: fp_irq_gpio_default {
 			mux {
