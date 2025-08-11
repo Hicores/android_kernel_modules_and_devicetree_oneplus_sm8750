@@ -7,7 +7,6 @@
 #include <linux/kernel.h>
 #include "frame_group.h"
 #include "frame_debug.h"
-
 #define MSG_COMM_LEN      50
 
 struct verbose_msg {
@@ -153,6 +152,7 @@ void fbg_dbg_reset(void)
 			verbose_msgs[i][j].val = -1;
 		}
 	}
+
 	for_each_possible_cpu(cpu)
 		for (msg_id = fbg_state; msg_id < max_cpu_msg_id; msg_id++) {
 			ptr = &per_cpu(cpu_state_msgs[msg_id], cpu);
@@ -179,6 +179,7 @@ void fbg_dbg_init(void)
 			strncpy(verbose_msgs[i][j].msg, verbose_msgs[0][j].msg, MSG_COMM_LEN);
 		}
 	}
+
 	for_each_possible_cpu(cpu)
 		for (msg_id = fbg_state; msg_id < max_cpu_msg_id; msg_id++) {
 			ptr = &per_cpu(cpu_state_msgs[msg_id], cpu);

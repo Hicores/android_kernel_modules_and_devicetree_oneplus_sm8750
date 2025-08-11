@@ -18,3 +18,5 @@ obj-$(CONFIG_OPLUS_FEATURE_ABNORMAL_FLAG) += oplus_overload/
 obj-$(CONFIG_OPLUS_FEATURE_WAKER_IDENTIFY) += waker_identify/
 obj-$(CONFIG_OPLUS_FEATURE_CPU_GAME) += oplus_game/
 obj-$(CONFIG_OPLUS_FEATURE_CPU_CLOSE_LOOP) += close_loop/
+obj-$(CONFIG_OPLUS_FEATURE_SMART_FREQ) += smart_freq/
+obj-$(CONFIG_OPLUS_FEATURE_FREQ_TUNE) += freq_tune_policy/

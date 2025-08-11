@@ -314,12 +314,12 @@ void reset_critical_task_time(void)
     mutex_unlock(&chb_mutex);
 }
 
-void notify_frame_produdce(void)
+void ctb_notify_frame_produce(void)
 {
     if (!ct_enable) {
         return;
     }
-    systrace_c_printk("notify_frame_produdce", 1);
+    systrace_c_printk("ctb_notify_frame_produce", 1);
     kthread_cancel_work_sync(&ct_work);
     kthread_cancel_work_sync(&cb_work);
     kthread_cancel_work_sync(&sw_work);
@@ -329,7 +329,7 @@ void notify_frame_produdce(void)
     reset_time();
     start_hrtimer();
     mutex_unlock(&chb_mutex);
-    systrace_c_printk("notify_frame_produdce", 0);
+    systrace_c_printk("ctb_notify_frame_produce", 0);
 }
 
 static void update_critical_task_time(struct task_struct *task, int i, bool is_prev_task)
@@ -461,7 +461,7 @@ static ssize_t expire_time_percentage_proc_write(struct file *file,
     if (target_fps > 0 && unitymain_expire_time_percentage > 0) {
         std_frame_length = NSEC_PER_SEC / target_fps;
         unitymain_expire_time_ns = std_frame_length / 100 * unitymain_expire_time_percentage;
-        per_window_time_span_ns = std_frame_length / SLIDE_WINDOW_SIZE;
+        per_window_time_span_ns = (int) (percentage / 100 + 1) * std_frame_length / SLIDE_WINDOW_SIZE;
     }
 
     mutex_unlock(&chb_mutex);

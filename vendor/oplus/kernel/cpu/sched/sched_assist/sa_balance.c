@@ -12,7 +12,6 @@
 #include "sa_common.h"
 #include "sa_fair.h"
 #include "sa_balance.h"
-
 /*
  * When the following macros are enabled, some debug information
  * will be output, which is very helpful for finding bugs.
@@ -1098,7 +1097,8 @@ bool ux_need_up_migration(struct task_struct *p, struct rq *rq)
  *                          with smaller capacity to CPUs with larger capacity.
  * TICKPULL_MIGR_RUNNABLE : pull long-runnable tasks from other CPUs. Unlike
  *                          TICKPULL_MIGR_RUNNING, tasks can be migrated to
- *                          CPUs with the same capacity.
+ *                          CPUs with the same capacity  or little util tasks
+ *                          can been migrated to small cores.
  */
 enum migr_type {
 	DOWN_MIGR = 1,
@@ -1181,7 +1181,7 @@ enum migr_type {
  *
  * TICKPULL_MIGR_RUNNABLE
  * cur_idx    order_idx   walk_cnt
- *    0            0          1
+ *    0            0          3    (only little util task can been migrated to small cores)
  *    1            1          3
  *    2            2          1
  *
@@ -1267,10 +1267,14 @@ bool calc_order_idx(enum migr_type type,
 		break;
 	case TICKPULL_MIGR_RUNNABLE:
 		*order_idx = curr_cls;
-		if ((cls_nr >= 3) && (curr_cls == cls_nr-2)) {
-			*walk_cnt = cls_nr;
-		} else {
+		/*
+		 * When curr_cls is biggest cores, only allow pull other biggest cores' task to it,
+		 * meanwhile, will allow sliver cores to pull other cores' task to it after ajust the logic.
+		 */
+		if (curr_cls == cls_nr-1) {
 			*walk_cnt = 1;
+		} else {
+			*walk_cnt = cls_nr;
 		}
 		break;
 	default:
@@ -1323,7 +1327,7 @@ int find_cpu_in_migration(struct task_struct *p,
 		for_each_cpu(cpu, &search_cpus) {
 			rq = cpu_rq(cpu);
 			curr = rq->curr;
-			orq = (struct oplus_rq *) rq->android_oem_data1;
+			orq = get_oplus_rq(rq);
 
 #ifdef DEBUG_LB_TICK
 			trace_printk("OPLUS_LB_TICK[%d]: cpu=%d, curr=%s$%d$%d, "
@@ -1408,7 +1412,7 @@ int oplus_kick_active_balance(struct rq *rq,
 {
 	unsigned long flags;
 	bool ret = false;
-	struct oplus_rq *orq = (struct oplus_rq *) rq->android_oem_data1;
+	struct oplus_rq *orq = get_oplus_rq(rq);
 
 	/* Invoke active balance to force migrate currently running task */
 	raw_spin_lock_irqsave(&rq->__lock, flags);
@@ -1439,7 +1443,7 @@ int oplus_kick_active_balance(struct rq *rq,
 static struct task_struct *oplus_detach_running_task(struct lb_env *env)
 {
 	struct task_struct *p;
-	struct oplus_rq *orq = (struct oplus_rq *) env->src_rq->android_oem_data1;
+	struct oplus_rq *orq = get_oplus_rq(env->src_rq);
 	pid_t pid = orq->lb.pid;
 
 #ifdef DEBUG_LB_TEST
@@ -1490,7 +1494,7 @@ static int oplus_active_load_balance_cpu_stop(void *data)
 	struct sched_domain *sd;
 	struct task_struct *p = NULL;
 	struct rq_flags rf;
-	struct oplus_rq *orq = (struct oplus_rq *) busiest_rq->android_oem_data1;
+	struct oplus_rq *orq = get_oplus_rq(busiest_rq);
 
 	rq_lock_irq(busiest_rq, &rf);
 
@@ -1631,7 +1635,7 @@ static struct task_struct *oplus_detach_running_task_for_rt(struct lb_env *env)
 {
 	struct rq *rq = env->src_rq;
 	struct plist_head *head = &rq->rt.pushable_tasks;
-	struct oplus_rq *orq = (struct oplus_rq *) rq->android_oem_data1;
+	struct oplus_rq *orq = get_oplus_rq(rq);
 	pid_t pid = orq->lb.pid;
 	struct task_struct *p;
 
@@ -1698,7 +1702,7 @@ static int oplus_active_load_balance_cpu_stop_for_rt(void *data)
 	struct sched_domain *sd;
 	struct task_struct *p = NULL;
 	struct rq_flags rf;
-	struct oplus_rq *orq = (struct oplus_rq *) busiest_rq->android_oem_data1;
+	struct oplus_rq *orq = get_oplus_rq(busiest_rq);
 #ifdef DEBUG_LB_RT_TICK
 	struct task_struct *task = NULL;
 #endif
@@ -1916,7 +1920,7 @@ static struct task_struct *oplus_pick_runnable_ux(
 	struct task_struct *task = NULL;
 	struct oplus_task_struct *ots = NULL;
 	struct rq *src_rq = cpu_rq(src_cpu);
-	struct oplus_rq *orq = (struct oplus_rq *) src_rq->android_oem_data1;
+	struct oplus_rq *orq = get_oplus_rq(src_rq);
 	u64 runnable_time, threshold_time = ULLONG_MAX;
 	unsigned long irqflag;
 	struct rb_node *node;
@@ -1988,6 +1992,7 @@ static noinline bool oplus_migrate_runnable_ux(void *data, struct rq *rq)
 	unsigned int this_cpu = cpu_of(rq);
 	int new_cpu = -1;
 	bool ret = false;
+	bool ux_cls_boost = false;
 
 	/*
 	 * Pick a ux_task that has been in the runnable state for a long time.
@@ -2000,6 +2005,11 @@ static noinline bool oplus_migrate_runnable_ux(void *data, struct rq *rq)
 	 * Choose a suitable cpu for this ux_task.
 	 */
 	new_cpu = find_cpu_in_migration(ux_task, this_cpu, NORMAL_MIGR, false);
+	if (new_cpu < 0) {
+		ux_cls_boost = get_task_cls_for_scene(ux_task) > 0 ? true : false;
+		if (!ux_cls_boost && !is_task_util_over(ux_task, BOOST_THRESHOLD_UNIT))
+			new_cpu = find_cpu_in_migration(ux_task, this_cpu, DOWN_MIGR, false);
+	}
 	if (new_cpu < 0)
 		return false;
 
@@ -2309,7 +2319,7 @@ static noinline bool oplus_tickpull_runnable_rt(void *data,
 			struct rq *rq, bool rt_boost)
 {
 	struct task_struct *curr = rq->curr;
-	struct oplus_rq *orq = (struct oplus_rq *)rq->android_oem_data1;
+	struct oplus_rq *orq = get_oplus_rq(rq);
 	int this_cpu = cpu_of(rq);
 	int cur_cls = topology_cluster_id(this_cpu);
 	int order_idx = -1, walk_cnt = -1, idx = -1;
@@ -2364,7 +2374,7 @@ static noinline bool oplus_tickpull_runnable_rt(void *data,
 
 		for_each_cpu(iter_cpu, &search_cpus) {
 			iter_rq = cpu_rq(iter_cpu);
-			iter_orq = (struct oplus_rq *) iter_rq->android_oem_data1;
+			iter_orq = get_oplus_rq(iter_rq);
 
 			/*
 			 * Cannot migrate to itself.
@@ -2413,6 +2423,15 @@ static noinline bool oplus_tickpull_runnable_rt(void *data,
 				continue;
 			}
 
+			/*
+			 * Just allow big cores' <light util> rt task can been pulled to sliver core.
+			 */
+			if (cur_cls == 0 && topology_cluster_id(iter_cpu) > 0 &&
+				is_task_util_over(rt_task, BOOST_THRESHOLD_UNIT)) {
+				rq_unlock(busiest_rq, &rf);
+				continue;
+			}
+
 #ifdef DEBUG_LB_RT_TICK
 			trace_printk("OPLUS_LB_TICKPULL[%d]: this_cpu=%d, curr=%s$%d, "
 				"busiest_cpu=%d, rt_task=%s$%d,\n",
@@ -2449,7 +2468,7 @@ static noinline bool oplus_tickpull_runnable_rt(void *data,
 static noinline bool oplus_tickpull_running_ux(void *data, struct rq *rq)
 {
 	struct task_struct *curr = rq->curr;
-	struct oplus_rq *orq = (struct oplus_rq *)rq->android_oem_data1;
+	struct oplus_rq *orq = get_oplus_rq(rq);
 	int this_cpu = cpu_of(rq);
 	int cur_cls = topology_cluster_id(this_cpu);
 	int order_idx = -1, walk_cnt = -1, idx = -1;
@@ -2509,7 +2528,7 @@ static noinline bool oplus_tickpull_running_ux(void *data, struct rq *rq)
 
 		for_each_cpu(iter_cpu, &search_cpus) {
 			iter_rq = cpu_rq(iter_cpu);
-			iter_orq = (struct oplus_rq *) iter_rq->android_oem_data1;
+			iter_orq = get_oplus_rq(iter_rq);
 
 			/*
 			 * Cannot migrate to itself.
@@ -2600,7 +2619,7 @@ static noinline bool oplus_tickpull_running_ux(void *data, struct rq *rq)
 static noinline bool oplus_tickpull_runnable_ux(void *data, struct rq *rq)
 {
 	struct task_struct *curr = rq->curr;
-	struct oplus_rq *orq = (struct oplus_rq *)rq->android_oem_data1;
+	struct oplus_rq *orq = get_oplus_rq(rq);
 	int this_cpu = cpu_of(rq);
 	int cur_cls = topology_cluster_id(this_cpu);
 	int order_idx = -1, walk_cnt = -1, idx = -1;
@@ -2653,7 +2672,7 @@ static noinline bool oplus_tickpull_runnable_ux(void *data, struct rq *rq)
 
 		for_each_cpu(iter_cpu, &search_cpus) {
 			iter_rq = cpu_rq(iter_cpu);
-			iter_orq = (struct oplus_rq *) iter_rq->android_oem_data1;
+			iter_orq = get_oplus_rq(iter_rq);
 
 			/*
 			 * Cannot migrate to itself.
@@ -2692,6 +2711,15 @@ static noinline bool oplus_tickpull_runnable_ux(void *data, struct rq *rq)
 			}
 
 			/*
+			 * Just allow big cores' <light util && no ux_boost> ux task can been pulled to sliver core.
+			 */
+			if (cur_cls == 0 && topology_cluster_id(iter_cpu) > 0 &&
+				(is_task_util_over(iter_task, BOOST_THRESHOLD_UNIT) || get_task_cls_for_scene(iter_task) > 0)) {
+				rq_unlock(iter_rq, &rf);
+				continue;
+			}
+
+			/*
 			 * Ha, ux_task can be migrated to this_cpu to perform enqueue
 			 * and dequeue operations.
 			 */
@@ -2705,9 +2733,7 @@ static noinline bool oplus_tickpull_runnable_ux(void *data, struct rq *rq)
 			 * in tick_balance, so you need to actively call preempt_curr
 			 * to send an ipi interrupt to wake it up.
 			 */
-			rq_lock(rq, &rf);
-			attach_task(rq, iter_task);
-			rq_unlock(rq, &rf);
+			attach_one_task(rq, iter_task);
 
 			oplus_loadbalance_systrace_print(OPLUS_LB_SYSTRACE_PID,
 					"tickpull_runnable_ux_cpu", iter_cpu, iter_task->pid);
@@ -3336,7 +3362,7 @@ static bool oplus_newidle_balance_pull_runnable_ux(
 
 		for_each_cpu(cpu, &search_cpus) {
 			rq = cpu_rq(cpu);
-			orq = (struct oplus_rq *) rq->android_oem_data1;
+			orq = get_oplus_rq(rq);
 
 			/*
 			 * Cannot migrate to itself.

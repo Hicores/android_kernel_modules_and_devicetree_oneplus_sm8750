@@ -112,7 +112,7 @@ config OPLUS_FEATURE_CPU_JANKINFO
 config OPLUS_PROCS_LOAD_STATE
 	tristate "config oplus_procs_load_state"
 	depends on OPLUS_FEATURE_CPU_JANKINFO
-	default y
+	default n
 	help
 	  oplus power procs load
 
@@ -190,9 +190,22 @@ config OPLUS_FEATURE_CEILING_FREE
 	help
 		set cb/omrg max frequency to default when user touch screen.
 
+config OPLUS_FEATURE_SCHED_DDL
+	bool "sched deadline"
+	default n
+	help
+		normal cfs tasks worst sched latency optimization
+
 config OPLUS_SCHED_HALT_MASK_PRT
 	tristate "print cpu halt_mask partial_halt_mask and parse_client"
 	default n
 	depends on OPLUS_SYSTEM_KERNEL_QCOM
 	help
 	  cpu halt_mask partial_halt_mask and parse_client
+
+config OPLUS_FEATURE_SCHED_CFBT
+	tristate "kernel feature CPU Centric frame boost"
+	default n
+	depends on OPLUS_FEATURE_FRAME_BOOST
+	help
+	  enable cpu kernel feature cpu centric frame boost

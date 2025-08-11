@@ -30,7 +30,7 @@ static int rt_num = 0;
 static int total_num = 0;
 static pid_t game_tgid = -1;
 
-static DEFINE_RWLOCK(rt_info_rwlock);
+static DEFINE_RAW_SPINLOCK(rt_info_lock);
 atomic_t have_valid_render_pid = ATOMIC_INIT(0);
 
 static inline bool same_rt_thread_group(struct task_struct *waker,
@@ -40,7 +40,7 @@ static inline bool same_rt_thread_group(struct task_struct *waker,
 }
 
 static inline bool sf_app_wakeup_game_thread(struct task_struct *waker,
-        struct task_struct *wakee)
+		struct task_struct *wakee)
 {
 	/*
 	 * surfaceflinger app thread start game logic every frame
@@ -82,6 +82,7 @@ static void try_to_wake_up_success_hook(void *unused, struct task_struct *task)
 {
 	struct render_related_thread *wakee;
 	struct render_related_thread *waker;
+	unsigned long flags;
 
 	ui_assist_threads_wake_stat(task);
 
@@ -101,7 +102,7 @@ static void try_to_wake_up_success_hook(void *unused, struct task_struct *task)
 	 * only update wake stat when lock is available,
 	 * if not available, skip.
 	 */
-	if (write_trylock(&rt_info_rwlock)) {
+	if (raw_spin_trylock_irqsave(&rt_info_lock, flags)) {
 		if (sf_app_wakeup_game_thread(current, task)) {
 			wakee = find_related_thread(task);
 			if (!wakee) {
@@ -157,9 +158,17 @@ static void try_to_wake_up_success_hook(void *unused, struct task_struct *task)
 		}
 
 unlock:
-		write_unlock(&rt_info_rwlock);
+		raw_spin_unlock_irqrestore(&rt_info_lock, flags);
 	}
 	heavy_task_boost(task, related_threads, total_num);
+}
+
+static bool need_tracked_task(char *name)
+{
+	bool skip = strstr(name, "binder:") || strstr(name, "HwBinder:") ||
+				strstr(name, "AudioTrack") || strstr(name, "NativeThread");
+
+	return !skip;
 }
 
 /*
@@ -189,7 +198,10 @@ static int rt_info_show(struct seq_file *m, void *v)
 	struct render_related_thread *results;
 	char *page;
 	char task_name[TASK_COMM_LEN];
+	pid_t tracked_pids[MAX_TRACKED_TASK_NUM];
+	int tracked_pid_num = 0;
 	ssize_t len = 0;
+	unsigned long flags;
 
 	if (atomic_read(&have_valid_render_pid) == 0)
 		return -ESRCH;
@@ -203,7 +215,7 @@ static int rt_info_show(struct seq_file *m, void *v)
 		return -ENOMEM;
 	}
 
-	read_lock(&rt_info_rwlock);
+	raw_spin_lock_irqsave(&rt_info_lock, flags);
 	for (i = 0; i < total_num; i++) {
 		results[i].pid = related_threads[i].pid;
 		results[i].task = related_threads[i].task;
@@ -215,7 +227,7 @@ static int rt_info_show(struct seq_file *m, void *v)
 	result_num = total_num;
 	gl_num = rt_num;
 	total_num = rt_num;
-	read_unlock(&rt_info_rwlock);
+	raw_spin_unlock_irqrestore(&rt_info_lock, flags);
 
 	if (unlikely(gl_num > 1)) {
 		sort(&results[0], gl_num,
@@ -229,10 +241,18 @@ static int rt_info_show(struct seq_file *m, void *v)
 
 	for (i = 0; i < result_num && i < MAX_TASK_NR; i++) {
 		if (get_task_name(results[i].pid, results[i].task, task_name)) {
+			if ((tracked_pid_num < MAX_TRACKED_TASK_NUM) && need_tracked_task(task_name)) {
+				tracked_pids[tracked_pid_num] = results[i].pid;
+				tracked_pid_num++;
+			}
+
 			len += snprintf(page + len, RESULT_PAGE_SIZE - len, "%d;%s;%u\n",
 				results[i].pid, task_name, results[i].wake_count);
 		}
 	}
+
+	if (tracked_pid_num > 0)
+		add_tasks_to_frame_group(tracked_pids, tracked_pid_num);
 
 	if (len > 0)
 		seq_puts(m, page);
@@ -268,6 +288,7 @@ static ssize_t rt_info_proc_write(struct file *file, const char __user *buf,
 	char *iter = page;
 	struct task_struct *task;
 	pid_t pid;
+	unsigned long flags;
 
 	ret = simple_write_to_buffer(page, sizeof(page) - 1, ppos, buf, count);
 	if (ret <= 0)
@@ -275,7 +296,7 @@ static ssize_t rt_info_proc_write(struct file *file, const char __user *buf,
 
 	atomic_set(&have_valid_render_pid, 0);
 
-	write_lock(&rt_info_rwlock);
+	raw_spin_lock_irqsave(&rt_info_lock, flags);
 
 	for (i = 0; i < rt_num; i++) {
 		if (related_threads[i].task)
@@ -332,7 +353,7 @@ static ssize_t rt_info_proc_write(struct file *file, const char __user *buf,
 		}
 	}
 
-	write_unlock(&rt_info_rwlock);
+	raw_spin_unlock_irqrestore(&rt_info_lock, flags);
 
 	return count;
 }
@@ -350,8 +371,9 @@ static int rt_num_show(struct seq_file *m, void *v)
 	char page[256] = {0};
 	ssize_t len = 0;
 	int i;
+	unsigned long flags;
 
-	read_lock(&rt_info_rwlock);
+	raw_spin_lock_irqsave(&rt_info_lock, flags);
 	len += snprintf(page + len, sizeof(page) - len, "rt_num=%d total_num=%d\n",
 		rt_num, total_num);
 	for (i = 0; i < rt_num; i++) {
@@ -359,7 +381,7 @@ static int rt_num_show(struct seq_file *m, void *v)
 			related_threads[i].task->tgid, related_threads[i].task->pid,
 			related_threads[i].task->comm);
 	}
-	read_unlock(&rt_info_rwlock);
+	raw_spin_unlock_irqrestore(&rt_info_lock, flags);
 
 	seq_puts(m, page);
 
@@ -384,28 +406,62 @@ static void register_rt_info_vendor_hooks(void)
 	register_trace_android_rvh_try_to_wake_up_success(try_to_wake_up_success_hook, NULL);
 }
 
-int get_critical_task_state(const char *name, pid_t pid)
+int check_task_name(const char *name)
 {
+	int name_len;
+	if (!name || strlen(name) >= TASK_COMM_LEN) {
+		return -1;
+	}
 	if (total_num <= 0 || atomic_read(&have_valid_render_pid) == 0) {
 		return -1;
 	}
-	struct task_struct *task = NULL;
-	int name_len = strlen(name);
-	for (int i = 0; i < total_num; i++) {
+	name_len = strlen(name);
+	return name_len;
+}
+
+int get_critical_task_by_name(const char *name, struct task_struct **task)
+{
+	int name_len, i;
+	unsigned long flags;
+
+	name_len = check_task_name(name);
+
+	if (name_len < 0)
+		return -1;
+
+	raw_spin_lock_irqsave(&rt_info_lock, flags);
+	for (i = 0; i < total_num; i++) {
 		if (strncmp(name, related_threads[i].task->comm, name_len) == 0) {
-			task = related_threads[i].task;
+			*task = get_pid_task(find_vpid(related_threads[i].pid), PIDTYPE_PID);
 			break;
 		}
 	}
-	if (task == NULL || task_pid_nr(task) != pid) {
-		return -1;
-	}
+	raw_spin_unlock_irqrestore(&rt_info_lock, flags);
+	return 0;
+}
 
-	if (task_is_running(task)) {
-		return 0;
-	} else {
-		return 1;
+int get_critical_task_state(const char *name, pid_t pid)
+{
+	int state = -1;
+	int name_len, i;
+	unsigned long flags;
+
+	name_len = check_task_name(name);
+
+	if (name_len < 0)
+		return -1;
+
+	raw_spin_lock_irqsave(&rt_info_lock, flags);
+	for (i = 0; i < total_num; i++) {
+		if (strncmp(name, related_threads[i].task->comm, name_len) == 0) {
+			if (related_threads[i].pid == pid) {
+				state = task_is_running(related_threads[i].task) ? 0 : 1;
+			}
+			break;
+		}
 	}
+	raw_spin_unlock_irqrestore(&rt_info_lock, flags);
+	return state;
 }
 
 int rt_info_init(void)

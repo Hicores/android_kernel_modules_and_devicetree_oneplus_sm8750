@@ -34,7 +34,7 @@ def define_oplus_local_modules():
             "//vendor/oplus/kernel/mm:oplus_bsp_zsmalloc",
         ],
         includes = ["."],
-        local_defines = ["CONFIG_HYBRIDSWAP","CONFIG_HYBRIDSWAP_SWAPD","CONFIG_HYBRIDSWAP_CORE","CONFIG_CRYPTO_LZ4K"],
+        local_defines = ["CONFIG_HYBRIDSWAP","CONFIG_HYBRIDSWAP_SWAPD","CONFIG_HYBRIDSWAP_CORE","CONFIG_CRYPTO_LZ4K","CONFIG_CRYPTO_ZSTDN"],
         conditional_defines = {
              "qcom":  ["CONFIG_QCOM_PANEL_EVENT_NOTIFIER"],
              "mtk":  ["CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY"],
@@ -74,10 +74,7 @@ def define_oplus_local_modules():
         ko_deps = [
             "//vendor/oplus/kernel/mm:oplus_bsp_hybridswap_zram",
         ],
-        local_defines = ["CONFIG_DYNAMIC_TUNING_SWAPPINESS", "CONFIG_OPLUS_BALANCE_ANON_FILE_RECLAIM", "CONFIG_HYBRIDSWAP_SWAPD"],
-        conditional_defines = {
-             "mtk":  ["CONFIG_OPLUS_EXTRA_FREE_KBYTES"],
-        },
+        local_defines = ["CONFIG_DYNAMIC_TUNING_SWAPPINESS", "CONFIG_OPLUS_BALANCE_ANON_FILE_RECLAIM", "CONFIG_HYBRIDSWAP_SWAPD", "CONFIG_OPLUS_EXTRA_FREE_KBYTES"],
         copts = select({
             "//build/kernel/kleaf:kocov_is_true": ["-fprofile-arcs", "-ftest-coverage"],
             "//conditions:default": [],
@@ -150,9 +147,9 @@ def define_oplus_local_modules():
         ]),
         includes = ["."],
         local_defines = ["CONFIG_OPLUS_FEATURE_KSWAPD_OPT", "CONFIG_COSTLY_ALLOC_MASK_RECLAIM"],
-        #conditional_defines = {
-        #    "mtk": ["CONFIG_COSTLY_ALLOC_MASK_RECLAIM"],
-        #},
+        conditional_defines = {
+            "qcom": ["CONFIG_QCOM_ALLOC_MASK_RECLAIM"],
+        },
         copts = select({
             "//build/kernel/kleaf:kocov_is_true": ["-fprofile-arcs", "-ftest-coverage"],
             "//conditions:default": [],
@@ -169,6 +166,43 @@ def define_oplus_local_modules():
         ]),
         includes = ["."],
         )
+
+    define_oplus_ddk_module(
+        name = "oplus_bsp_zstdn",
+        srcs = native.glob([
+            "**/*.h",
+            "hybridswap_zram/zstd/include/*.h",
+            "hybridswap_zram/zstd/common/*.h",
+            "hybridswap_zram/zstd/compress/*.h",
+            "hybridswap_zram/zstd/decompress/*.h",
+            "hybridswap_zram/zstd/crypto_zstd.c",
+            "hybridswap_zram/zstd/zstd_compress_module.c",
+            "hybridswap_zram/zstd/xxhash.c",
+            "hybridswap_zram/zstd/common/debug.c",
+            "hybridswap_zram/zstd/common/entropy_common.c",
+            "hybridswap_zram/zstd/common/error_private.c",
+            "hybridswap_zram/zstd/common/fse_decompress.c",
+            "hybridswap_zram/zstd/common/zstd_common.c",
+            "hybridswap_zram/zstd/compress/fse_compress.c",
+            "hybridswap_zram/zstd/compress/hist.c",
+            "hybridswap_zram/zstd/compress/huf_compress.c",
+            "hybridswap_zram/zstd/compress/zstd_compress.c",
+            "hybridswap_zram/zstd/compress/zstd_compress_literals.c",
+            "hybridswap_zram/zstd/compress/zstd_compress_sequences.c",
+            "hybridswap_zram/zstd/compress/zstd_compress_superblock.c",
+            "hybridswap_zram/zstd/compress/zstd_double_fast.c",
+            "hybridswap_zram/zstd/compress/zstd_fast.c",
+            "hybridswap_zram/zstd/compress/zstd_lazy.c",
+            "hybridswap_zram/zstd/compress/zstd_ldm.c",
+            "hybridswap_zram/zstd/compress/zstd_opt.c",
+            "hybridswap_zram/zstd/zstd_decompress_module.c",
+            "hybridswap_zram/zstd/decompress/huf_decompress.c",
+            "hybridswap_zram/zstd/decompress/zstd_ddict.c",
+            "hybridswap_zram/zstd/decompress/zstd_decompress.c",
+            "hybridswap_zram/zstd/decompress/zstd_decompress_block.c"
+        ]),
+        includes = ["."],
+    )
 
     ddk_copy_to_dist_dir(
         name = "oplus_bsp_mm",
@@ -187,5 +221,6 @@ def define_oplus_local_modules():
             "oplus_bsp_kswapd_opt",
 #            "oplus_bsp_look_around",
             "oplus_bsp_memleak_detect",
+            "oplus_bsp_zstdn",
         ],
     )

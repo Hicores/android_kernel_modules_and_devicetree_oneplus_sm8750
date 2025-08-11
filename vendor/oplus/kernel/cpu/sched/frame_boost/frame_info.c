@@ -13,7 +13,6 @@
 #define DEFAULT_VUTIL_MARGIN    (0)
 #define DEFAULT_FRAME_RATE      (60)
 #define DEFAULT_FRAME_INTERVAL  (16666667L)
-
 static struct frame_info sf_frame_info;
 static struct frame_info game_frame_info;
 static struct frame_info multi_frame_info[MULTI_FBG_NUM];

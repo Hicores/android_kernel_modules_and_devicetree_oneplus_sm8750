@@ -52,7 +52,8 @@ void android_vh_dup_task_struct_handler(void *unused,
 		struct task_struct *tsk, struct task_struct *orig)
 {
 	int node;
-	struct oplus_task_struct *ots = NULL;
+	struct oplus_task_struct *ots;
+	struct oplus_task_struct *orig_ots;
 
 	if (!tsk || !orig)
 		return;
@@ -69,6 +70,14 @@ void android_vh_dup_task_struct_handler(void *unused,
 #if IS_ENABLED(CONFIG_ARM64_AMU_EXTN) && IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
 	ots->uid_struct = NULL;
 #endif
+	/* if thread fork from RenderThread, inherit its IM_FLAG_RENDER_THREAD */
+	orig_ots = get_oplus_task_struct(orig);
+	if (!IS_ERR_OR_NULL(orig_ots)) {
+		if (test_bit(IM_FLAG_RENDER_THREAD, &orig_ots->im_flag) && !strcmp(orig->comm, "RenderThread")) {
+			set_bit(IM_FLAG_RENDER_THREAD, &ots->im_flag);
+		}
+	}
+
 	smp_mb();
 
 	WRITE_ONCE(tsk->android_oem_data1[OTS_IDX], (u64) ots);
@@ -106,6 +115,13 @@ void android_vh_free_task_handler(void *unused, struct task_struct *tsk)
 	list_del_init(&ots->fbg_list);
 	atomic_set(&ots->is_vip_mvp, 0);
 	ots->task = NULL;
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
+	RB_CLEAR_NODE(&ots->ddl_node);
+	ots->ddl = ots->ddl_active_ts = 0;
+	memset(&ots->state, 0, sizeof(unsigned long));
+#endif
+
 #if IS_ENABLED(CONFIG_ARM64_AMU_EXTN) && IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
 	ots->uid_struct = NULL;
 #endif
@@ -168,6 +184,11 @@ static void init_oplus_task_struct(void *ptr)
 	INIT_LIST_HEAD(&ots->lkinfo.node);
 /*#endif*/
 	INIT_LIST_HEAD(&ots->fbg_list);
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
+	RB_CLEAR_NODE(&ots->ddl_node);
+#endif
+
 #ifdef CONFIG_LOCKING_PROTECT
 	INIT_LIST_HEAD(&ots->locking_entry);
 	ots->locking_start_time = 0;
@@ -195,6 +216,11 @@ static void init_oplus_task_struct(void *ptr)
 	raw_spin_lock_init(&ots->fbg_list_entry_lock);
 	ots->preferred_cluster_id = -1;
 	ots->fbg_depth = -1;
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_CFBT)
+	ots->cfbt_cur_group = -1;
+	ots->cfbt_running = false;
+#endif /* CONFIG_OPLUS_FEATURE_SCHED_CFBT */
 }
 
 static void alloc_ots_mem_for_all_threads(void)

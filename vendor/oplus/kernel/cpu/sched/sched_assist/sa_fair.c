@@ -28,8 +28,11 @@
 #include "sa_pipeline.h"
 #endif
 
-#include "trace_sched_assist.h"
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
+#include "sa_ddl.h"
+#endif
 
+#include "trace_sched_assist.h"
 
 extern unsigned int sysctl_sched_latency;
 
@@ -64,7 +67,7 @@ int oplus_idle_cpu(int cpu)
 	return 1;
 }
 
-static inline int get_task_cls_for_scene(struct task_struct *task)
+inline int get_task_cls_for_scene(struct task_struct *task)
 {
 	struct ux_sched_cputopo ux_cputopo = ux_sched_cputopo;
 	int cls_max = ux_cputopo.cls_nr - 1;
@@ -220,7 +223,7 @@ bool should_ux_task_skip_cpu(struct task_struct *task, unsigned int dst_cpu)
 		if (test_bit(IM_FLAG_CAMERA_HAL, &im_flag))
 			return false;
 
-		orq = (struct oplus_rq *) cpu_rq(dst_cpu)->android_oem_data1;
+		orq = get_oplus_rq(cpu_rq(dst_cpu));
 		if (orq_has_ux_tasks(orq)) {
 			reason = 2;
 			goto skip;
@@ -262,7 +265,7 @@ int get_topology_cluster_id(int cpu)
 static inline bool select_target_cpu_fastpath(struct task_struct *task, int target_cpu)
 {
 	struct rq *orig_rq = cpu_rq(target_cpu);
-	struct oplus_rq *orig_orq = (struct oplus_rq *)orig_rq->android_oem_data1;
+	struct oplus_rq *orig_orq = get_oplus_rq(orig_rq);
 
 	if (test_task_ux(orig_rq->curr))
 		return false;
@@ -420,17 +423,19 @@ bool set_ux_task_to_prefer_cpu(struct task_struct *task, int *orig_target_cpu)
 	int start_cls = -1;
 	int cpu = 0;
 	int direction = -1;
-	int subopt_cpu = -1, vip_cpu = -1;
 	int orig_cls_id = 0;
 	cpumask_t search_cpus = CPU_MASK_NONE;
 	int max_spare_cap_cpu = -1;
 	int best_idle_cpu = -1;
-	unsigned long spare_cap = 0, max_spare_cap = 0;
-	unsigned long vip_max_spare_cap = 0;
-	unsigned long subopt_max_spare_cap = 0;
 	unsigned int min_exit_latency = UINT_MAX;
 	unsigned long best_idle_cuml_util = ULONG_MAX;
 	bool walk_next_cls = true;
+	bool ux_cls_boost = false;
+	int cpu_rq_ux_runnable_cnt = UINT_MAX;
+	int least_nr_cpu = -1;
+	int subopt_cpu = -1, vip_cpu = -1, max_subopt_cpu = -1;
+	long spare_cap = 0, subopt_max_spare_cap = 0;
+	long vip_max_spare_cap = -1, max_spare_cap = -1, rt_max_spare_cap = -1;
 
 	if (unlikely(!global_sched_assist_enabled))
 		return false;
@@ -449,6 +454,7 @@ bool set_ux_task_to_prefer_cpu(struct task_struct *task, int *orig_target_cpu)
 	}
 
 	start_cls = cls_nr = get_task_cls_for_scene(task);
+	ux_cls_boost = start_cls > 0 ? true : false;
 	/*
 	 * Avoiding ux core selection can easily lead to small cores for tasks
 	 * that would otherwise be on large cores
@@ -471,10 +477,10 @@ retry:
 
 	for_each_cpu(cpu, &search_cpus) {
 		rq = cpu_rq(cpu);
-		orq = (struct oplus_rq *)rq->android_oem_data1;
+		orq = get_oplus_rq(rq);
 
 		/* fit status to check if taks util fits cpu capacity */
-		if (cls_nr == 0 && !task_fits_max(task, cpu))
+		if (cls_nr == 0 && (!task_fits_max(task, cpu) || ux_cls_boost))
 			break;
 
 		/*
@@ -504,18 +510,33 @@ retry:
 		if (best_idle_cpu != -1)
 			continue;
 
+		/*
+		 * case: The system runs on a heavy load picking no cpu, and prevent
+		 * EAS picking a small core, pick max_spare_cap cpu and first cluster
+		 */
 		spare_cap = oplus_capacity_spare_of(cpu, task);
+		if (spare_cap > subopt_max_spare_cap) {
+			subopt_max_spare_cap = spare_cap;
+			max_subopt_cpu = cpu;
+		}
+
+		/*
+		 * Keep track of runnables for each CPU, if none of the
+		 * CPUs have spare capacity then use CPU with less
+		 * number of ux runnables.
+		 */
+		if (orq->nr_running < cpu_rq_ux_runnable_cnt) {
+			cpu_rq_ux_runnable_cnt = orq->nr_running;
+			least_nr_cpu = cpu;
+		}
+
 		/*
 		 * strict_ux case: The system runs on a heavy load picking no cpu,
 		 * and prevent EAS picking a small core, pick max_spare_cap cpu
 		 * and first cluster
 		 */
-		if (walk_next_cls && strict_ux_task(task) && !global_silver_perf_core) {
-			if (spare_cap > subopt_max_spare_cap) {
-				subopt_max_spare_cap = spare_cap;
-				subopt_cpu = cpu;
-			}
-		}
+		if (walk_next_cls && strict_ux_task(task) && !global_silver_perf_core)
+			subopt_cpu = cpu;
 
 		/* If an ux thread running on this CPU, drop it! */
 		if (oplus_get_ux_state(rq->curr) & SCHED_ASSIST_UX_MASK)
@@ -524,8 +545,13 @@ retry:
 		if (orq_has_ux_tasks(orq))
 			continue;
 
-		if (rq->curr->prio < MAX_RT_PRIO)
+		if (rq->curr->prio < MAX_RT_PRIO) {
+			if (spare_cap > rt_max_spare_cap) {
+				rt_max_spare_cap = spare_cap;
+				subopt_cpu = cpu;
+			}
 			continue;
+		}
 
 		/* If there are rt threads in runnable state on this CPU, drop it! */
 		if (rt_rq_is_runnable(&rq->rt))
@@ -572,8 +598,18 @@ retry:
 
 	walk_next_cls = false;
 	cls_nr = cls_nr + direction;
-	if (cls_nr > 0 && cls_nr < ux_cputopo.cls_nr)
-		goto retry;
+	if (global_lowend_plat_opt) {
+		if (cls_nr >= 0 && cls_nr < ux_cputopo.cls_nr) {
+			goto retry;
+		} else if (cls_nr == ux_cputopo.cls_nr && start_cls != 0) {
+			cls_nr = start_cls - 1;
+			direction = -1;
+			goto retry;
+		}
+	} else {
+		if (cls_nr > 0 && cls_nr < ux_cputopo.cls_nr)
+			goto retry;
+	}
 
 	/* 3 No cpu select, Preempt VIP threads, Priority: ux > VIP. */
 	if (vip_cpu != -1) {
@@ -585,12 +621,33 @@ retry:
 		return true;
 	}
 
+	/* 4 No cpu select, RT: max_spare_cap/strict_ux */
 	if (subopt_cpu != -1) {
 		trace_set_ux_task_to_prefer_cpu(task, "subopt",
 						*orig_target_cpu, subopt_cpu,
 						start_cls, cls_nr,
 						&search_cpus);
 		*orig_target_cpu = subopt_cpu;
+		return true;
+	}
+
+	/* 5 No cpu select, cpu:max_spare_cap */
+	if (max_subopt_cpu != -1) {
+		trace_set_ux_task_to_prefer_cpu(task, "spare_sub",
+						*orig_target_cpu, max_subopt_cpu,
+						start_cls, cls_nr,
+						&search_cpus);
+		*orig_target_cpu = max_subopt_cpu;
+		return true;
+	}
+
+	/* 6 No cpu select, Keep track of runnables for each CPU */
+	if (least_nr_cpu != -1) {
+		trace_set_ux_task_to_prefer_cpu(task, "nr_cpu",
+						*orig_target_cpu, least_nr_cpu,
+						start_cls, cls_nr,
+						&search_cpus);
+		*orig_target_cpu = least_nr_cpu;
 		return true;
 	}
 
@@ -616,7 +673,7 @@ EXPORT_SYMBOL(should_ux_task_skip_eas);
 extern void set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se);
 void oplus_replace_next_task_fair(struct rq *rq, struct task_struct **p, struct sched_entity **se, bool *repick, bool simple)
 {
-	struct oplus_rq *orq = (struct oplus_rq *) rq->android_oem_data1;
+	struct oplus_rq *orq = get_oplus_rq(rq);
 	struct rb_node *node;
 	unsigned long irqflag;
 
@@ -716,7 +773,7 @@ void resched_timer_init(void)
 
 	for_each_possible_cpu(i) {
 		rq = cpu_rq(i);
-		orq = (struct oplus_rq *) rq->android_oem_data1;
+		orq = get_oplus_rq(rq);
 		orq->cpu = i;
 		hrtimer_init(orq->resched_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 		orq->resched_timer->function = &no_preempt_resched;
@@ -776,6 +833,11 @@ inline void oplus_check_preempt_wakeup(struct rq *rq, struct task_struct *p, boo
 #endif
 		}
 #endif
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
+		oplus_ddl_check_preempt(rq, p, curr, preempt, nopreempt);
+#endif
+
 		return;
 	}
 
@@ -791,7 +853,7 @@ inline void oplus_check_preempt_wakeup(struct rq *rq, struct task_struct *p, boo
 	}
 
 	/* both of wake_task and curr_task are ux */
-	orq = (struct oplus_rq *) rq->android_oem_data1;
+	orq = get_oplus_rq(rq);
 	spin_lock_irqsave(orq->ux_list_lock, irqflag);
 	smp_mb__after_spinlock();
 	if (!IS_ERR_OR_NULL(ots) && !oplus_rbnode_empty(&ots->ux_entry)) {
@@ -1035,6 +1097,8 @@ void android_rvh_update_deadline_handler(void *unused, struct cfs_rq *cfs_rq, st
 
 void android_rvh_enqueue_entity_handler(void *unused, struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
+	struct task_struct *p = entity_is_task(se) ? task_of(se) : NULL;
+	struct rq *rq = rq_of(cfs_rq);
 #ifdef OPLUS_UX_EEVDF_COMPATIBLE
 	/* if enqueue back the current task */
 	if ((cfs_rq->curr == se) && entity_is_task(se)) {
@@ -1048,28 +1112,33 @@ void android_rvh_enqueue_entity_handler(void *unused, struct cfs_rq *cfs_rq, str
 
 #ifdef CONFIG_LOCKING_PROTECT
 #ifndef CONFIG_LOCKING_LAST_ENTITY
-	do {
-		struct task_struct *p = entity_is_task(se) ? task_of(se) : NULL;
-		struct rq *rq = rq_of(cfs_rq);
-		LOCKING_CALL_OP(enqueue_entity, rq, p);
-	} while (0);
+	LOCKING_CALL_OP(enqueue_entity, rq, p);
 #endif
+#endif
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
+	oplus_enqueue_ddl_node(rq, p);
 #endif
 }
 
-#ifdef CONFIG_LOCKING_PROTECT
+
 void android_rvh_dequeue_entity_handler(void *unused, struct cfs_rq *cfs, struct sched_entity *se)
 {
 	struct task_struct *p = entity_is_task(se) ? task_of(se) : NULL;
 	struct rq *rq = rq_of(cfs);
-
+#ifdef CONFIG_LOCKING_PROTECT
 #ifndef CONFIG_LOCKING_LAST_ENTITY
 	LOCKING_CALL_OP(dequeue_entity, rq, p);
 #else
 	LOCKING_CALL_OP(clear_last_entity, rq, p);
 #endif
-}
 #endif
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
+	oplus_dequeue_ddl_node(rq, p);
+#endif
+}
+
 
 void android_rvh_check_preempt_wakeup_handler(void *unused, struct rq *rq, struct task_struct *p, bool *preempt, bool *nopreempt,
 	int wake_flags, struct sched_entity *se, struct sched_entity *pse, int next_buddy_marked)
@@ -1096,6 +1165,11 @@ void android_rvh_replace_next_task_fair_handler(void *unused,
 		LOCKING_CALL_OP(pick_last_entity, rq, p, se, repick, simple);
 #endif
 	}
+#endif
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
+	if (*repick != true)
+		oplus_replace_next_task_ddl(rq, p, se, repick, simple);
 #endif
 
 	/*

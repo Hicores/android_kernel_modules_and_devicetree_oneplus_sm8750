@@ -27,7 +27,9 @@ static int geas_period_ns = 16 * 1000000;
 
 #define MIN_MBPS	500UL
 #define HIST_PEAK_TOL	75
-
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_CFBT)
+extern int (*cfbt_update_cx_voting_state )(int enable, int period_ms);
+#endif
 /* Returns MBps of read/writes for the sampling window. */
 static unsigned long bytes_to_mbps(unsigned long long bytes, unsigned int us)
 {
@@ -927,6 +929,7 @@ static int geas_irq_handler(struct hwmon_node *node)
 	struct bw_hwmon *hw = node->hw;
 	bool new_freq = false;
 	int ret = 0;
+	int handled = 0;
 	u64 now = ktime_get();
 
 	if (node_ext->frame_drive || node_ext->timer_drive) {
@@ -958,24 +961,15 @@ static int geas_irq_handler(struct hwmon_node *node)
 				}
 				node_ext->wake = 0;
 			}
+			handled = 1;
 		}
-	} else {
-		if (bwmon_update_cur_freq(node)) {
-			ret = qcom_dcvs_update_votes(dev_name(hw->dev),
-						node->cur_freqs,
-						1 + (hw->second_vote_supported << 1),
-						hw->dcvs_path);
-		}
-		node_ext->last_ts = now;
-		if (ret < 0)
-			dev_err(hw->dev, "bwmon irq update failed: %d\n", ret);
 	}
 
 	if (node_ext->frame_debug_level >= 1)
 		pr_err("%s, frame_drive = %u, timer_drive = %u, enable_irq = %u, new_freq = %d, ret = %d",
 				__func__, node_ext->frame_drive, node_ext->timer_drive, node_ext->enable_irq, new_freq, ret);
 
-	return ret;
+	return handled;
 }
 
 static struct frame_bw_history_manager *init_frame_bw_manager(void)
@@ -1271,6 +1265,10 @@ static int __init geas_init(void)
 {
 	if (self_test)
 		geas_init_proc();
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_CFBT)
+	cfbt_update_cx_voting_state = update_geas_bwmon_periodly;
+#endif
 
 	return 0;
 }

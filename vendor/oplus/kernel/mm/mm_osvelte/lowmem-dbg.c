@@ -26,12 +26,7 @@
 #include <linux/vmalloc.h>
 #include <linux/errno.h>
 #include <trace/events/vmscan.h>
-/*
-#ifdef CONFIG_ANDROID_DEBUG_SYMBOLS
-#include <linux/android_debug_symbols.h>
-#else
-#include "../../../drivers/soc/qcom/debug_symbol.h"
-#endif */
+#include <linux/kprobes.h>
 #include "../../../mm/slab.h"
 
 #include "common.h"
@@ -41,6 +36,8 @@
 
 static struct list_head *debug_slab_caches;
 static struct mutex *debug_slab_mutex;
+typedef unsigned long(*kallsyms_lookup_name_t)(const char *name);
+static kallsyms_lookup_name_t kallsyms_lookup_name_dup = NULL;
 
 static void lowmem_dbg_dump(struct work_struct *work);
 
@@ -214,18 +211,17 @@ int dump_procs_fd_info(struct files_acct *acct, const char *title, bool verbose)
 }
 
 #ifdef CONFIG_SLUB_DEBUG
-static int dump_slab_info(bool verbose)
+static int __nocfi dump_slab_info(bool verbose)
 {
-/*
-#ifdef CONFIG_ANDROID_DEBUG_SYMBOLS
-	debug_slab_caches = (struct list_head *)android_debug_symbol(ADS_SLAB_CACHES);
-	debug_slab_mutex = (struct mutex *) android_debug_symbol(ADS_SLAB_MUTEX);
-#endif*/
-	if(!debug_slab_caches)
+	if(!debug_slab_caches) {
+		pr_err("unable to get slab_caches\n");
 		return 0;
+	}
 
-	if(!debug_slab_mutex)
+	if(!debug_slab_mutex) {
+		pr_err("unable to get slab_mutex\n");
 		return 0;
+	}
 
 	osvelte_info("======= %s\n", __func__);
 	if (likely(!verbose)) {
@@ -546,16 +542,6 @@ static void lowmem_dbg_dump(struct work_struct *work)
 {
 	__lowmem_dbg_dump(&g_cfg);
 }
-/*
-#ifndef CONFIG_ANDROID_DEBUG_SYMBOLS
-#define OSVELTE_DEBUG_LOOKUP(_var, type) \
-	do { \
-		debug_##_var = (type *)DEBUG_SYMBOL_LOOKUP(_var); \
-		if (!debug_##_var) { \
-			pr_err("osvelte: %s symbol not available in vmlinux\n", #_var); \
-		} \
-	} while (0)
-#endif*/
 
 void direct_reclaim_vh(void *data, int order, gfp_t gfp_flags)
 {
@@ -595,23 +581,27 @@ static int lowmem_dbg_show(struct seq_file *m, void *unused)
 }
 DEFINE_PROC_SHOW_ATTRIBUTE(lowmem_dbg);
 
-int osvelte_lowmem_dbg_init(struct proc_dir_entry *root)
+int __nocfi osvelte_lowmem_dbg_init(struct proc_dir_entry *root)
 {
 	struct lowmem_dbg_cfg *cfg = &g_cfg;
 	unsigned long total_ram = sys_totalram();
+	struct kprobe kallsyms_lookup_name_kp = {
+		.symbol_name = "kallsyms_lookup_name"
+	};
 
 	if (register_trace_mm_vmscan_direct_reclaim_begin(direct_reclaim_vh, NULL)) {
 		pr_err("register lowmem-dbg vendor hook failed\n");
 		return -EINVAL;
 	}
-/*
-#ifndef CONFIG_ANDROID_DEBUG_SYMBOLS
-	if(!debug_symbol_available())
-		return -EPROBE_DEFER;
+	if (!register_kprobe(&kallsyms_lookup_name_kp)) {
+		kallsyms_lookup_name_dup = (kallsyms_lookup_name_t)kallsyms_lookup_name_kp.addr;
+		pr_info("suceesfully get kallsyms_lookup_name addr:0x%px\n", kallsyms_lookup_name_dup);
+		unregister_kprobe(&kallsyms_lookup_name_kp);
+		debug_slab_caches = (struct list_head *)kallsyms_lookup_name_dup("slab_caches");
+		debug_slab_mutex = (struct mutex *)kallsyms_lookup_name_dup("slab_mutex");
+	} else
+		pr_err("get kallsyms_lookup_name addr from kprobe failed!\n");
 
-	OSVELTE_DEBUG_LOOKUP(slab_caches, struct list_head);
-	OSVELTE_DEBUG_LOOKUP(slab_mutex, struct mutex);
-#endif */
 	cfg->interval = 10 * HZ;
 
 	if (total_ram >= PAGES(SZ_4G + SZ_8G))

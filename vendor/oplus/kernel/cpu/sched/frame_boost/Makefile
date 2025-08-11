@@ -6,3 +6,5 @@ LINUXINCLUDE += -I$(srctree)/
 
 obj-$(CONFIG_OPLUS_FEATURE_FRAME_BOOST) += oplus_bsp_frame_boost.o
 oplus_bsp_frame_boost-y := frame_boost.o frame_sysctl.o frame_info.o frame_group.o cluster_boost.o frame_debug.o frame_timer.o
+oplus_bsp_frame_boost-$(CONFIG_OPLUS_FEATURE_SCHED_CFBT) += cfbt_boost.o cfbt_rescue.o cfbt_trace.o cfbt_config.o
+oplus_bsp_frame_boost-$(CONFIG_OPLUS_FEATURE_GEAS) += cfbt_cx_opt.o

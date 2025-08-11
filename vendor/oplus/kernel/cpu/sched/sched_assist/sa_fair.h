@@ -52,6 +52,7 @@ void nopreempt_state_systrace_c(unsigned int cpu, int nopreempt_state);
 #endif
 
 int oplus_idle_cpu(int cpu);
+inline int get_task_cls_for_scene(struct task_struct *task);
 
 #ifdef CONFIG_OPLUS_ADD_CORE_CTRL_MASK
 bool oplus_cpu_halted(unsigned int cpu);
@@ -88,9 +89,7 @@ void android_rvh_post_init_entity_util_avg_handler(void *unused, struct sched_en
 void android_rvh_replace_next_task_fair_handler(void *unused, struct rq *rq, struct task_struct **p, struct sched_entity **se,
 	bool *repick, bool simple, struct task_struct *prev);
 void android_rvh_can_migrate_task_handler(void *unused, struct task_struct *p, int dst_cpu, int *can_migrate);
-#ifdef CONFIG_LOCKING_PROTECT
 void android_rvh_enqueue_entity_handler(void *unused, struct cfs_rq *cfs, struct sched_entity *se);
 void android_rvh_dequeue_entity_handler(void *unused, struct cfs_rq *cfs, struct sched_entity *se);
-#endif
 
 #endif /* _OPLUS_SA_FAIR_H_ */

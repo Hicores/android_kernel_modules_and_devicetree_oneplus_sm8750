@@ -86,6 +86,7 @@ LOCAL_MODULE_KO_DIRS += oplus/codecs/tfa98xx-v6/oplus_audio_tfa98xx_v6.ko
 LOCAL_MODULE_KO_DIRS += oplus/codecs/sipa/oplus_audio_sipa.ko
 LOCAL_MODULE_KO_DIRS += oplus/codecs/sipa/oplus_audio_sipa_tuning.ko
 LOCAL_MODULE_KO_DIRS += oplus/qcom/oplus_speaker_manager/oplus_audio_pa_manager.ko
+LOCAL_MODULE_KO_DIRS += oplus/codecs/aw87xxx/oplus_audio_aw87xxx.ko
 #endif /* OPLUS_ARCH_EXTENDS */
 # add for oplus audio daemon kernel
 LOCAL_MODULE_KO_DIRS += oplus/oplus_audio_daemon/oplus_audio_daemon.ko

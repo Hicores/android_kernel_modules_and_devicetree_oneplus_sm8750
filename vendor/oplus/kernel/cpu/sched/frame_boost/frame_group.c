@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2020-2024 Oplus. All rights reserved.
+ * Copyright (C) 2020-2025 Oplus. All rights reserved.
  */
 
 #include <linux/sched.h>
@@ -29,6 +29,10 @@
 #endif
 #define CREATE_TRACE_POINTS
 #include "frame_boost_trace.h"
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_CFBT)
+#include "cfbt_boost.h"
+#endif /* CONFIG_OPLUS_FEATURE_SCHED_CFBT */
 
 #define NONE_FRAME_TASK      (0)
 #define STATIC_FRAME_TASK    (1 << 0)
@@ -1428,7 +1432,6 @@ static unsigned long update_freq_policy_util(struct frame_group *grp, u64 wallcl
 	curr_putil = get_frame_putil(grp->id, grp->curr_window_scale, grp->frame_zone);
 	atomic64_set(&grp->curr_util, curr_putil);
 	frame_util = max_t(unsigned long, prev_putil, curr_putil);
-
 	/* We allow vendor governor's freq-query using vutil, but we only updating
 	 * last_util_update_time when called from new hook update_curr()
 	 */
@@ -1640,6 +1643,11 @@ bool fbg_freq_policy_util(unsigned int policy_flags, const struct cpumask *query
 
 	if (!__frame_boost_enabled())
 		return false;
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_CFBT)
+	if (get_cfbt_current_scene() >= 0)
+		cfbt_freq_policy_util(policy_flags, query_cpus, util);
+#endif /* CONFIG_OPLUS_FEATURE_SCHED_CFBT */
 
 	/* Adjust governor util with multi frame boost group's policy util */
 	for (i = MULTI_FBG_ID; i <  MULTI_FBG_ID + MULTI_FBG_NUM; i++) {
@@ -2054,6 +2062,12 @@ static inline void fbg_update_task_util(struct task_struct *tsk, u64 runtime,
 	u64 wallclock;
 
 	ots = get_oplus_task_struct(tsk);
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_CFBT)
+	if (!IS_ERR_OR_NULL(ots) && ots->cfbt_cur_group >= 0)
+		cfbt_update_task_util(tsk, ots->cfbt_cur_group, runtime, need_freq_update);
+#endif /* CONFIG_OPLUS_FEATURE_SCHED_CFBT */
+
 	if (IS_ERR_OR_NULL(ots) || (ots->fbg_state == NONE_FRAME_TASK) || (ots->fbg_state & PENDING_FRAME_TASK))
 		return;
 
@@ -2116,6 +2130,11 @@ static void update_group_nr_running(struct task_struct *p, int event)
 	ots = get_oplus_task_struct(p);
 	if (IS_ERR_OR_NULL(ots))
 		return;
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_CFBT)
+	if (ots->cfbt_cur_group >= 0)
+		cfbt_update_group_nr_running(ots->cfbt_cur_group, event, ots);
+#endif /* CONFIG_OPLUS_FEATURE_SCHED_CFBT */
 
 	grp = task_get_frame_group(ots);
 	if (grp == NULL)
@@ -2472,7 +2491,8 @@ bool set_frame_group_task_to_perfer_cpu(struct task_struct *p, int *target_cpu)
 	bool walk_next_cls = false;
 	struct oplus_sched_cluster *cluster = NULL;
 	cpumask_t search_cpus = CPU_MASK_NONE;
-	unsigned long spare_cap = 0, max_spare_cap = 0;
+	long spare_cap = 0;
+	long max_spare_cap = -1;
 	int max_spare_cap_cpu = -1, backup_cpu = -1;
 	struct frame_group *grp = NULL;
 	struct oplus_task_struct *ots = get_oplus_task_struct(p);
@@ -2483,6 +2503,13 @@ bool set_frame_group_task_to_perfer_cpu(struct task_struct *p, int *target_cpu)
 
 	if (!__frame_boost_enabled())
 		return false;
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_CFBT)
+	if (get_cfbt_current_scene() >= 0 && ots->cfbt_running) {
+		if(cfbt_select_task_rq(p, target_cpu))
+			return true;
+	}
+#endif /* CONFIG_OPLUS_FEATURE_SCHED_CFBT */
 
 	/* The interface is currently offered for use in games. */
 	cluster = fbg_get_task_preferred_cluster(p);
@@ -2515,7 +2542,7 @@ bool set_frame_group_task_to_perfer_cpu(struct task_struct *p, int *target_cpu)
 
 
 		orig_rq = cpu_rq(*target_cpu);
-		orig_orq = (struct oplus_rq *)orig_rq->android_oem_data1;
+		orig_orq = get_oplus_rq(orig_rq);
 		orig_cls_id = topology_cluster_id(*target_cpu);
 
 		/*
@@ -2550,6 +2577,10 @@ bool set_frame_group_task_to_perfer_cpu(struct task_struct *p, int *target_cpu)
 		cluster = fb_cluster[start_cls];
 	}
 
+	/* In case preferred_cluster->cpus are inactive, give it a try to walk_next_cls */
+	if ((grp != NULL) && (cluster == grp->preferred_cluster))
+		walk_next_cls = true;
+
 retry:
 	cpumask_and(&search_cpus, p->cpus_ptr, cpu_active_mask);
 #ifdef CONFIG_OPLUS_ADD_CORE_CTRL_MASK
@@ -2558,10 +2589,6 @@ retry:
 #endif /* CONFIG_OPLUS_ADD_CORE_CTRL_MASK */
 	cpumask_and(&search_cpus, &search_cpus, &cluster->cpus);
 
-	/* In case preferred_cluster->cpus are inactive, give it a try to walk_next_cls */
-	if ((grp != NULL) && (cluster == grp->preferred_cluster))
-		walk_next_cls = true;
-
 	for_each_cpu(iter_cpu, &search_cpus) {
 		struct rq *rq = NULL;
 		struct oplus_rq *orq = NULL;
@@ -2569,7 +2596,7 @@ retry:
 
 		rq = cpu_rq(iter_cpu);
 		curr = rq->curr;
-		orq = (struct oplus_rq *)rq->android_oem_data1;
+		orq = get_oplus_rq(rq);
 
 		if (curr) {
 			struct oplus_task_struct *ots_curr =

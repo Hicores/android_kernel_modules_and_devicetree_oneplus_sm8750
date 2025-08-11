@@ -10,7 +10,6 @@
 #include <linux/ratelimit.h>
 #include <linux/ktime.h>
 #include <linux/seq_file.h>
-#include <linux/version.h>
 #include <linux/atomic/atomic-long.h>
 #include <linux/sched.h>
 #include <trace/events/sched.h>
@@ -245,10 +244,11 @@ static inline int get_task_cgroup_id(struct task_struct *task)
 #else
 inline int get_task_cgroup_id(struct task_struct *task) { return 0; }
 #endif
-
-#if  IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
-// todo add ux type
-#endif
+/*
+ * #if  IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
+ * todo add ux type
+ * #endif
+ */
 
 void ohm_trig_init(void)
 {
@@ -445,7 +445,7 @@ void ohm_schedstats_record(int sched_type, struct task_struct *task, u64 delta_m
 	if (rt_task(task)) {
 		ohm_sched_stat_record_common(sched_stat, &sched_stat->rt, delta_ms);
 	}
-	if (SA_CGROUP_FOREGROUND == grp_id) {
+	if (SA_CGROUP_BACKGROUND == grp_id) {
 		ohm_sched_stat_record_common(sched_stat, &sched_stat->bg, delta_ms);
 	}
 	if (SA_CGROUP_SYS_BACKGROUND == grp_id) {
@@ -596,7 +596,6 @@ static ssize_t iowait_read(struct file *filp, char __user *buff, size_t count, l
 	*off += len < count ? len : count;
 
 	return (len < count ? len : count);
-
 }
 
 static const struct proc_ops proc_iowait_fops = {
@@ -747,7 +746,6 @@ static ssize_t dstate_read(struct file *filp, char __user *buff, size_t count, l
 static const struct proc_ops proc_dstate_fops = {
 	.proc_read = dstate_read,
 	.proc_lseek = default_llseek,
-
 };
 
 /*******alloc wait ************/
@@ -1290,7 +1288,7 @@ static void uids_proc_fs_init(struct proc_dir_entry *p_parent)
 		goto out_p_temp;
 
 out_p_temp:
-	return ;
+	return;
 }
 
 

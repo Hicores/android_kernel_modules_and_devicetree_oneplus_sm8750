@@ -169,7 +169,7 @@ void set_uclamp_max(struct task_struct *task)
 {
 	int max_uc = 0;
 
-	max_uc = limited_capacity(goplus_cpu) * 2 / 3;
+	max_uc = limited_capacity(goplus_cpu) * 3 / 5;
 	max_uc = max_uc > SET_UCLAMP ? SET_UCLAMP : max_uc;
 	task->uclamp_req[UCLAMP_MAX].value = max_uc;
 	task->uclamp_req[UCLAMP_MAX].bucket_id = uclamp_bucket_id(max_uc);

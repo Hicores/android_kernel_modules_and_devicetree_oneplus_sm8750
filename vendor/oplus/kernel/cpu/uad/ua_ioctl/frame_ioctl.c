@@ -23,8 +23,17 @@
 #include <../kernel/oplus_cpu/sched/frame_boost/frame_info.h>
 #include <../kernel/oplus_cpu/sched/frame_boost/frame_timer.h>
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_CFBT)
+#include <../kernel/oplus_cpu/sched/frame_boost/cfbt_boost.h>
+#include <../kernel/oplus_cpu/sched/frame_boost/cfbt_boost_struct.h>
+#include <../kernel/oplus_cpu/sched/frame_boost/cfbt_config.h>
+#include <linux/uaccess.h>
+#include <linux/string.h>
+#endif /* CONFIG_OPLUS_FEATURE_SCHED_CFBT */
+
 #include "frame_ioctl.h"
 #include "ua_ioctl_common.h"
+
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_CLOSE_LOOP)
 #include <../kernel/oplus_cpu/sched/frame_boost/frame_trace.h>
@@ -420,6 +429,307 @@ static long handle_ofb_extra_cmd(unsigned int cmd, void __user *uarg)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_CFBT)
+static bool is_cfbt_cmd(unsigned int cmd)
+{
+	return _IOC_TYPE(cmd) == CFBT_MAGIC;
+}
+
+static long cfbt_set_scene_start(void __user *uarg)
+{
+	struct cfbt_struct data;
+	int ret = -1;
+
+	if (uarg == NULL)
+		return -EINVAL;
+
+	if (copy_from_user(&data, uarg, sizeof(data)))
+		return -EFAULT;
+
+	ret = __cfbt_set_scene_start(&data);
+	if (copy_to_user(uarg, &data, sizeof(data)) && !ret) {
+		ofb_debug("%s: copy_to_user fail\n", __func__);
+		return -EFAULT;
+	}
+	return ret;
+}
+
+static long cfbt_set_scene_end(void __user *uarg)
+{
+	struct cfbt_struct data;
+	int ret = -1;
+
+	if (uarg == NULL)
+		return -EINVAL;
+
+	if (copy_from_user(&data, uarg, sizeof(data)))
+		return -EFAULT;
+
+	ret = __cfbt_set_scene_end(&data);
+	if (copy_to_user(uarg, &data, sizeof(data)) && !ret) {
+		ofb_debug("%s: copy_to_user fail\n", __func__);
+		return -EFAULT;
+	}
+	return ret;
+}
+static long cfbt_request_frame_id(void __user *uarg)
+{
+	struct cfbt_struct data;
+	int ret = -1;
+
+	if (uarg == NULL)
+		return -EINVAL;
+
+	if (copy_from_user(&data, uarg, sizeof(data)))
+		return -EFAULT;
+
+	ret = __cfbt_request_frame_id(&data);
+	if (copy_to_user(uarg, &data, sizeof(data)) && !ret) {
+		ofb_debug("%s: copy_to_user fail\n", __func__);
+		return -EFAULT;
+	}
+	return ret;
+}
+
+static long cfbt_set_stage(void __user *uarg)
+{
+	struct cfbt_struct data;
+	int ret = -1;
+
+	if (uarg == NULL)
+		return -EINVAL;
+
+	if (copy_from_user(&data, uarg, sizeof(data)))
+		return -EFAULT;
+
+	ret = __cfbt_set_stage(&data);
+	data.header.ret = 0;
+	if (copy_to_user(uarg, &data, sizeof(data)) && !ret) {
+		ofb_debug("%s: copy_to_user fail\n", __func__);
+		return -EFAULT;
+	}
+	return ret;
+}
+
+static long cfbt_add_stage_tid(void __user *uarg)
+{
+	struct cfbt_struct data;
+	int ret = -1;
+
+	if (uarg == NULL)
+		return -EINVAL;
+
+	if (copy_from_user(&data, uarg, sizeof(data)))
+		return -EFAULT;
+
+	ret = __cfbt_add_stage_tid(&data);
+	if (copy_to_user(uarg, &data, sizeof(data)) && !ret) {
+		ofb_debug("%s: copy_to_user fail\n", __func__);
+		return -EFAULT;
+	}
+	return ret;
+}
+
+static long cfbt_remove_stage_tid(void __user *uarg)
+{
+	struct cfbt_struct data;
+	int ret = -1;
+
+	if (uarg == NULL)
+		return -EINVAL;
+
+	if (copy_from_user(&data, uarg, sizeof(data)))
+		return -EFAULT;
+
+	ret = __cfbt_remove_stage_tid(&data);
+
+	if (copy_to_user(uarg, &data, sizeof(data)) && !ret) {
+		ofb_debug("%s: copy_to_user fail\n", __func__);
+		return -EFAULT;
+	}
+	return ret;
+}
+
+static long cfbt_release_frame_id(void __user *uarg)
+{
+	struct cfbt_struct data;
+	int ret = -1;
+
+	if (uarg == NULL)
+		return -EINVAL;
+
+	if (copy_from_user(&data, uarg, sizeof(data)))
+		return -EFAULT;
+
+	ret = __cfbt_release_frame_id(&data);
+
+	if (copy_to_user(uarg, &data, sizeof(data)) && !ret) {
+		ofb_debug("%s: copy_to_user fail\n", __func__);
+		return -EFAULT;
+	}
+	return ret;
+}
+
+static long cfbt_remove_tids(void __user *uarg)
+{
+	struct cfbt_struct data;
+	int ret = -1;
+
+	if (uarg == NULL)
+		return -EINVAL;
+
+	if (copy_from_user(&data, uarg, sizeof(data)))
+		return -EFAULT;
+
+	ret = __cfbt_remove_common_tid(&data);
+
+	if (copy_to_user(uarg, &data, sizeof(data)) && !ret) {
+		ofb_debug("%s: copy_to_user fail\n", __func__);
+		return -EFAULT;
+	}
+	return ret;
+}
+
+static long cfbt_add_tids(void __user *uarg)
+{
+	struct cfbt_struct data;
+	int ret = -1;
+
+	if (uarg == NULL)
+		return -EINVAL;
+
+	if (copy_from_user(&data, uarg, sizeof(data)))
+		return -EFAULT;
+
+	ret = __cfbt_add_common_tids(&data);
+
+	if (copy_to_user(uarg, &data, sizeof(data)) && !ret) {
+		ofb_debug("%s: copy_to_user fail\n", __func__);
+		return -EFAULT;
+	}
+	return ret;
+}
+
+static long cfbt_set_frame_start(void __user *uarg)
+{
+	struct cfbt_struct data;
+	int ret = -1;
+
+	if (uarg == NULL)
+		return -EINVAL;
+
+	if (copy_from_user(&data, uarg, sizeof(data)))
+		return -EFAULT;
+
+	ret = __cfbt_set_frame_start(&data);
+
+	if (copy_to_user(uarg, &data, sizeof(data)) && !ret) {
+		ofb_debug("%s: copy_to_user fail\n", __func__);
+		return -EFAULT;
+	}
+	return ret;
+}
+
+int cfbt_notify_rescue_of_user(void __user *uarg)
+{
+	struct cfbt_struct data;
+	int ret = -1;
+
+	if (uarg == NULL)
+		return -EINVAL;
+
+	if (copy_from_user(&data, uarg, sizeof(data)))
+		return -EFAULT;
+
+	ret = __cfbt_notify_rescue_of_user(&data);
+
+	if (copy_to_user(uarg, &data, sizeof(data)) && !ret) {
+		ofb_debug("%s: copy_to_user fail\n", __func__);
+		return -EFAULT;
+	}
+	return ret;
+}
+
+int cfbt_notify_stop_rescue_of_user(void __user *uarg)
+{
+	struct cfbt_struct data;
+	int ret = -1;
+
+	if (uarg == NULL)
+		return -EINVAL;
+
+	if (copy_from_user(&data, uarg, sizeof(data)))
+		return -EFAULT;
+
+	ret = __cfbt_notify_stop_rescue_of_user(&data);
+
+	if (copy_to_user(uarg, &data, sizeof(data)) && !ret) {
+		ofb_debug("%s: copy_to_user fail\n", __func__);
+		return -EFAULT;
+	}
+	return ret;
+}
+
+int cfbt_notify_error_of_user(void __user *uarg)
+{
+	struct cfbt_struct data;
+	int ret = -1;
+
+	if (uarg == NULL)
+		return -EINVAL;
+
+	if (copy_from_user(&data, uarg, sizeof(data)))
+		return -EFAULT;
+
+	ret = __cfbt_notify_error_of_user(&data);
+
+	if (copy_to_user(uarg, &data, sizeof(data)) && !ret) {
+		ofb_debug("%s: copy_to_user fail\n", __func__);
+		return -EFAULT;
+	}
+	return ret;
+}
+
+static long handle_cfbt_cmd(unsigned int cmd, void __user *uarg)
+{
+	if (!is_cfbt_enabled())
+		return -1;
+
+	switch (cmd) {
+	case CMD_ID_CFBT_START:
+		return cfbt_set_scene_start(uarg);
+	case CMD_ID_CFBT_END:
+		return cfbt_set_scene_end(uarg);
+	case CMD_ID_CFBT_REQUEST_FRAME_ID:
+		return cfbt_request_frame_id(uarg);
+	case CMD_ID_CFBT_SET_STAGE:
+		return cfbt_set_stage(uarg);
+	case CMD_ID_CFBT_ADD_STAGE_TID:
+		return cfbt_add_stage_tid(uarg);
+	case CMD_ID_CFBT_REMOVE_STAGE_TID:
+		return cfbt_remove_stage_tid(uarg);
+	case CMD_ID_CFBT_ADD_TIDS:
+		return cfbt_add_tids(uarg);
+	case CMD_ID_CFBT_REMOVE_TIDS:
+		return cfbt_remove_tids(uarg);
+	case CMD_ID_CFBT_FRAME_START:
+		return cfbt_set_frame_start(uarg);
+	case CMD_ID_CFBT_FRAME_END:
+		return cfbt_release_frame_id(uarg);
+	case CFBT_NOTIFY_RESCUE_OF_USER:
+		return cfbt_notify_rescue_of_user(uarg);
+	case CFBT_NOTIFY_STOP_RESCUE_OF_USER:
+		return cfbt_notify_stop_rescue_of_user(uarg);
+	case CFBT_NOTIFY_ERR_OF_USER:
+		return cfbt_notify_error_of_user(uarg);
+	default:
+		return -ENOTTY;
+	}
+
+	return 0;
+}
+#endif /* CONFIG_OPLUS_FEATURE_SCHED_CFBT */
+
 /* TODO for each group */
 static void setup_stune_data(struct ofb_stune_data *stune_data, int grp_id)
 {
@@ -475,6 +785,18 @@ static long ofb_sys_ioctl(struct file *file, unsigned int cmd, unsigned long arg
 	struct ofb_ctrl_data data;
 	struct ofb_stune_data stune_data;
 	void __user *uarg = (void __user *)arg;
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_CFBT)
+	if (is_cfbt_cmd(cmd)) {
+		return handle_cfbt_cmd(cmd, uarg);
+	}
+#endif /* CONFIG_OPLUS_FEATURE_SCHED_CFBT */
+
+#ifdef CONFIG_ARCH_MEDIATEK
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_CFBT)
+	return 0;
+#endif /* CONFIG_OPLUS_FEATURE_SCHED_CFBT */
+#endif
 
 	if (is_ofb_extra_cmd(cmd)) {
 		return handle_ofb_extra_cmd(cmd, uarg);
@@ -696,7 +1018,7 @@ static const struct proc_ops ofb_sys_ctrl_fops = {
 static ssize_t proc_stune_boost_write(struct file *file, const char __user *buf,
 		size_t count, loff_t *ppos)
 {
-	#define          OPT_STR_MAX   3
+	#define		  OPT_STR_MAX   3
 
 	int grp_id;
 	int boost_type;
@@ -959,6 +1281,380 @@ static void cl_frame_ioctl_init(void)
 }
 #endif /* CONFIG_OPLUS_FEATURE_CPU_CLOSE_LOOP */
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_CFBT)
+static ssize_t proc_cfbt_debug_write(struct file *file, const char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char buffer[13];
+	int err, val;
+
+	memset(buffer, 0, sizeof(buffer));
+
+	if (count > sizeof(buffer) - 1)
+		count = sizeof(buffer) - 1;
+
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+
+	buffer[count] = '\0';
+	err = kstrtoint(strstrip(buffer), 10, &val);
+	if (err)
+		return err;
+
+	enable_tracing(val);
+
+	return count;
+}
+
+static ssize_t proc_cfbt_enable_write(struct file *file, const char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char buffer[13];
+	int err, val;
+
+	memset(buffer, 0, sizeof(buffer));
+
+	if (count > sizeof(buffer) - 1)
+		count = sizeof(buffer) - 1;
+
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+
+	buffer[count] = '\0';
+	err = kstrtoint(strstrip(buffer), 10, &val);
+	if (err)
+		return err;
+
+	enable_cfbt(val);
+
+	return count;
+}
+
+static ssize_t proc_cfbt_suspend_write(struct file *file, const char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char buffer[13];
+	int err, val;
+
+	memset(buffer, 0, sizeof(buffer));
+
+	if (count > sizeof(buffer) - 1)
+		count = sizeof(buffer) - 1;
+
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+
+	buffer[count] = '\0';
+	err = kstrtoint(strstrip(buffer), 10, &val);
+	if (err)
+		return err;
+
+	suspend_cfbt(val);
+
+	return count;
+}
+
+static ssize_t proc_cfbt_util_down_write(struct file *file, const char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char buffer[13];
+	int err, val;
+
+	memset(buffer, 0, sizeof(buffer));
+
+	if (count > sizeof(buffer) - 1)
+		count = sizeof(buffer) - 1;
+
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+
+	buffer[count] = '\0';
+	err = kstrtoint(strstrip(buffer), 10, &val);
+	if (err)
+		return err;
+
+	set_cfbt_util_down(val);
+
+	return count;
+}
+
+#define MAX_INPUT_LEN 100
+static ssize_t proc_cfbt_rescue_write(struct file *file, const char __user *buffer,
+		size_t count, loff_t *ppos)
+{
+	char input[MAX_INPUT_LEN];
+	int i = 0;
+	char *token;
+
+	if (count > MAX_INPUT_LEN - 1)
+		return -EINVAL;
+
+	if (copy_from_user(input, buffer, count))
+		return -EFAULT;
+
+	input[count] = '\0';
+
+	token = strsep((char **)&input, " ");
+	while (token && i < MAX_USER_CFG_COUNT) {
+		sscanf(token, "%d", &user_configurations[i]);
+		token = strsep(NULL, " ");
+		i++;
+	}
+
+	return count;
+}
+static ssize_t proc_cfbt_debug_read(struct file *file, char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char buffer[20];
+	size_t len = 0;
+
+	len = snprintf(buffer, sizeof(buffer), "debug_enabled=%d\n", is_tracing_enabled());
+
+	return simple_read_from_buffer(buf, count, ppos, buffer, len);
+}
+
+static ssize_t proc_cfbt_enable_read(struct file *file, char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char buffer[20];
+	size_t len = 0;
+
+	len = snprintf(buffer, sizeof(buffer), "%d\n", is_cfbt_enabled());
+
+	return simple_read_from_buffer(buf, count, ppos, buffer, len);
+}
+
+static ssize_t proc_cfbt_suspend_read(struct file *file, char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char buffer[20];
+	size_t len = 0;
+
+	len = snprintf(buffer, sizeof(buffer), "%d\n", is_cfbt_suspend());
+
+	return simple_read_from_buffer(buf, count, ppos, buffer, len);
+}
+
+static ssize_t proc_cfbt_util_down_read(struct file *file, char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char buffer[20];
+	size_t len = 0;
+
+	len = snprintf(buffer, sizeof(buffer), "%d\n", get_cfbt_util_down());
+
+	return simple_read_from_buffer(buf, count, ppos, buffer, len);
+}
+
+static ssize_t proc_cfbt_rescue_read(struct file *file, char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char buffer[128];
+	char rescue_time[128] = {'\0'};
+	size_t len = 0;
+
+	cfb_get_rescue_rtime(rescue_time, 128);
+	len = snprintf(buffer, sizeof(buffer), "state:%d %d %d %d %d %d, avg:%s\n", user_configurations[0], user_configurations[1],
+		user_configurations[2], user_configurations[3], user_configurations[4], user_configurations[5], (char *)rescue_time);
+
+	return simple_read_from_buffer(buf, count, ppos, buffer, len);
+}
+
+static int parse_input(const char *buf, size_t count)
+{
+	char input[128] = {0};
+	char *token, *cur;
+	int ret = 0;
+	int scene;
+	u64 interval;
+	char *sep = NULL;
+
+	if (count == 0 || count >= sizeof(input)) {
+		pr_warn("Input exceeds 128 bytes!\n");
+		return -EINVAL;
+	}
+
+	strncpy(input, buf, count);
+
+	cur = input;
+	while ((token = strsep(&cur, ",")) != NULL) {
+		sep = strchr(token, ':');
+		if (!sep) {
+			pr_warn("Invalid format: %s\n", token);
+			ret = -EINVAL;
+			continue;
+		}
+		*sep = '\0';
+
+		if (kstrtoint(token, 10, &scene) || kstrtou64(sep + 1, 10, &interval)) {
+			pr_warn("Invalid number in: %s\n", token);
+			ret = -EINVAL;
+			continue;
+		}
+
+		if (interval == 0) {
+			pr_warn("Invalid interval:%llu (must >0)\n", interval);
+			ret = -EINVAL;
+			continue;
+		}
+
+		update_scene_interval(scene, interval);
+	}
+
+	return ret;
+}
+
+static int scene_proc_show(struct seq_file *m, void *v)
+{
+	print_scene_configs(m);
+	return 0;
+}
+
+/* data format: echo "2:80000000,3:60000000" */
+static ssize_t scene_proc_write(struct file *file, const char __user *buf,
+								size_t count, loff_t *ppos)
+{
+	char kbuf[128] = {0};
+
+	if (count == 0 || count >= sizeof(kbuf))
+		return -EINVAL;
+
+	if (copy_from_user(kbuf, buf, count))
+		return -EFAULT;
+
+	kbuf[count] = '\0';
+	return parse_input(kbuf, count) ?: count;
+}
+
+static int scene_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, scene_proc_show, NULL);
+}
+
+static const struct proc_ops proc_cfbt_debug_fops = {
+	.proc_write		= proc_cfbt_debug_write,
+	.proc_read		= proc_cfbt_debug_read,
+	.proc_lseek		= default_llseek,
+};
+
+static const struct proc_ops proc_cfbt_enable_fops = {
+	.proc_write		= proc_cfbt_enable_write,
+	.proc_read		= proc_cfbt_enable_read,
+	.proc_lseek		= default_llseek,
+};
+
+static const struct proc_ops proc_cfbt_suspend_fops = {
+	.proc_write		= proc_cfbt_suspend_write,
+	.proc_read		= proc_cfbt_suspend_read,
+	.proc_lseek		= default_llseek,
+};
+
+static const struct proc_ops proc_cfbt_util_down_fops = {
+	.proc_write		= proc_cfbt_util_down_write,
+	.proc_read		= proc_cfbt_util_down_read,
+	.proc_lseek		= default_llseek,
+};
+
+static const struct proc_ops proc_cfbt_rescue_fops = {
+	.proc_write		= proc_cfbt_rescue_write,
+	.proc_read		= proc_cfbt_rescue_read,
+	.proc_lseek		= default_llseek,
+};
+
+static const struct proc_ops proc_cfbt_scene_ops = {
+	.proc_open = scene_proc_open,
+	.proc_read = seq_read,
+	.proc_write = scene_proc_write,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+};
+
+static ssize_t proc_cfbt_select_opt_enable_write(struct file *file, const char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char buffer[13];
+	int err, val;
+
+	memset(buffer, 0, sizeof(buffer));
+
+	if (count > sizeof(buffer) - 1)
+		count = sizeof(buffer) - 1;
+
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+
+	buffer[count] = '\0';
+	err = kstrtoint(strstrip(buffer), 10, &val);
+	if (err)
+		return err;
+
+	enable_selection_option(val);
+
+	return count;
+}
+
+static ssize_t proc_cfbt_select_opt_enable_read(struct file *file, char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char buffer[30];
+	size_t len = 0;
+
+	len = snprintf(buffer, sizeof(buffer), "cfbt_select_opt_enable=%d\n", is_selection_option_enabled());
+
+	return simple_read_from_buffer(buf, count, ppos, buffer, len);
+}
+
+static const struct proc_ops proc_cfbt_select_opt_enable_fops = {
+	.proc_write		= proc_cfbt_select_opt_enable_write,
+	.proc_read		= proc_cfbt_select_opt_enable_read,
+	.proc_lseek		= default_llseek,
+};
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_GEAS)
+static ssize_t proc_cfbt_cx_opt_enable_write(struct file *file, const char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char buffer[13];
+	int err, val;
+
+	memset(buffer, 0, sizeof(buffer));
+
+	if (count > sizeof(buffer) - 1)
+		count = sizeof(buffer) - 1;
+
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+
+	buffer[count] = '\0';
+	err = kstrtoint(strstrip(buffer), 10, &val);
+	if (err)
+		return err;
+
+	enable_cx_opt(val);
+
+	return count;
+}
+
+static ssize_t proc_cfbt_cx_opt_enable_read(struct file *file, char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char buffer[30];
+	size_t len = 0;
+
+	len = snprintf(buffer, sizeof(buffer), "cfbt_cx_opt_enable=%d\n", is_enable_cx_opt());
+
+	return simple_read_from_buffer(buf, count, ppos, buffer, len);
+}
+
+static const struct proc_ops proc_cfbt_cx_opt_enable_fops = {
+	.proc_write		= proc_cfbt_cx_opt_enable_write,
+	.proc_read		= proc_cfbt_cx_opt_enable_read,
+	.proc_lseek		= default_llseek,
+};
+#endif /* CONFIG_OPLUS_FEATURE_GEAS */
+#endif /* CONFIG_OPLUS_FEATURE_SCHED_CFBT */
+
 #define GLOBAL_SYSTEM_UID KUIDT_INIT(1000)
 #define GLOBAL_SYSTEM_GID KGIDT_INIT(1000)
 int frame_ioctl_init(void)
@@ -968,11 +1664,40 @@ int frame_ioctl_init(void)
 
 	frame_boost_proc = proc_mkdir(FRAMEBOOST_PROC_NODE, NULL);
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_CFBT)
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_GEAS)
+	pentry = proc_create("cfbt_cx_opt_enable", 0666, frame_boost_proc, &proc_cfbt_cx_opt_enable_fops);
+	if (!pentry)
+		goto ERROR_INIT;
+#endif /* CONFIG_OPLUS_FEATURE_GEAS */
+	pentry = proc_create("cfbt_select_opt_enable", 0666, frame_boost_proc, &proc_cfbt_select_opt_enable_fops);
+	if (!pentry)
+		goto ERROR_INIT;
+	pentry = proc_create("cfbt_debug", 0666, frame_boost_proc, &proc_cfbt_debug_fops);
+	if (!pentry)
+		goto ERROR_INIT;
+	pentry = proc_create("cfbt_enable", 0666, frame_boost_proc, &proc_cfbt_enable_fops);
+	if (!pentry)
+		goto ERROR_INIT;
+	pentry = proc_create("cfbt_suspend", 0666, frame_boost_proc, &proc_cfbt_suspend_fops);
+	if (!pentry)
+		goto ERROR_INIT;
+	pentry = proc_create("cfbt_util_down", 0666, frame_boost_proc, &proc_cfbt_util_down_fops);
+	if (!pentry)
+		goto ERROR_INIT;
+	pentry = proc_create("cfbt_rescue", 0666, frame_boost_proc, &proc_cfbt_rescue_fops);
+	if (!pentry)
+		goto ERROR_INIT;
+	pentry = proc_create("cfbt_scene", 0666, frame_boost_proc, &proc_cfbt_scene_ops);
+	if (!pentry)
+		goto ERROR_INIT;
+#endif /* CONFIG_OPLUS_FEATURE_SCHED_CFBT */
+
 	pentry = proc_create("ctrl", S_IRWXUGO, frame_boost_proc, &ofb_ctrl_fops);
 	if (!pentry)
 		goto ERROR_INIT;
 
-	pentry = proc_create("sys_ctrl", (S_IRWXU|S_IRWXG), frame_boost_proc, &ofb_sys_ctrl_fops);
+	pentry = proc_create("sys_ctrl", 0666, frame_boost_proc, &ofb_sys_ctrl_fops);
 	if (!pentry) {
 		goto ERROR_INIT;
 	} else {

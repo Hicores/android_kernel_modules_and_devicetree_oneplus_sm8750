@@ -124,6 +124,13 @@ struct oplus_task_struct {
 	unsigned long state;
 	unsigned long im_flag;
 	atomic_t is_vip_mvp;
+
+/* #if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL) */
+	u64 ddl;
+	u64 ddl_active_ts;
+	u64 runnable_ts;
+	struct rb_node ddl_node;
+/* #endif */
 /*#if IS_ENABLED(CONFIG_OPLUS_FEATURE_ABNORMAL_FLAG)*/
 	int abnormal_flag;
 /*#endif*/
@@ -157,7 +164,6 @@ struct oplus_task_struct {
 	int locking_depth;
 	int lk_tick_hit;
 /*#endif*/
-
 /*#if IS_ENABLED(CONFIG_OPLUS_LOCKING_STRATEGY)*/
 	struct locking_info lkinfo;
 /*#endif*/
@@ -207,6 +213,11 @@ struct oplus_task_struct {
 	struct powermodel_cpu_task_state *powermodel_cpu_task_states[MAX_CPU_CNT];
 	u64 exec_runtime;
 #endif
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_CFBT)
+	int cfbt_cur_group;
+	bool cfbt_running;
+#endif /* CONFIG_OPLUS_FEATURE_SCHED_CFBT */
 } ____cacheline_aligned;
 
 /*#if IS_ENABLED(CONFIG_OPLUS_FEATURE_LOADBALANCE)*/

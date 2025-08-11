@@ -57,6 +57,7 @@ enum {
 	max_cpu_msg_id,
 };
 
+
 void val_systrace_c(int grp_id, unsigned long val, char *msg, int msg_id);
 void cpu_val_systrace_c(unsigned long val, unsigned int cpu, char *msg, int msg_id);
 void cpu_grp_systrace_c(int grp_id, unsigned long val, unsigned int cpu, char *msg, int msg_id);

@@ -12,6 +12,11 @@
 #include "frame_boost.h"
 #include "frame_debug.h"
 #include "frame_timer.h"
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_CFBT)
+#include "cfbt_boost.h"
+#endif /* CONFIG_OPLUS_FEATURE_SCHED_CFBT */
+
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
 #include <../kernel/oplus_cpu/sched/sched_assist/sa_common.h>
 #endif
@@ -70,6 +75,16 @@ static int __init oplus_frame_boost_init(void)
 	int ret = 0;
 
 	fbg_sysctl_init();
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_CFBT)
+	ret = cfbt_frame_group_init();
+	if (ret != 0)
+		goto out;
+#endif /* CONFIG_OPLUS_FEATURE_SCHED_CFBT */
+
+	ret = frame_info_init();
+	if (ret != 0)
+		goto out;
 
 	ret = frame_group_init();
 	if (ret != 0)

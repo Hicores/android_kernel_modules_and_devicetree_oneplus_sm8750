@@ -13,6 +13,7 @@
 #define CONFIG_ALLOC_ORDER_STAT 1
 #define CONFIG_KSWAPS_LOAD_STAT 1
 #define CONFIG_KSWAPD_NICE 1
+#define CONFIG_ORDER3_OPT 1
 #endif
 
 #include <linux/types.h>
@@ -34,10 +35,16 @@
 #include <trace/hooks/vmscan.h>
 #include <trace/events/vmscan.h>
 #endif
+#include "../../mm/internal.h"
 
 #if defined(CONFIG_ALLOC_ADJUST_FLAGS) || defined(CONFIG_ALLOC_ORDER_STAT) \
 	|| defined(CONFIG_KSWAPS_LOAD_STAT) || defined(CONFIG_COSTLY_ALLOC_MASK_RECLAIM)
 #define KBUF_LEN 10
+
+#if defined(CONFIG_QCOM_ALLOC_MASK_RECLAIM)
+#define QCOM_ALLOC_MASK_RECLAIM_ORDER 4
+#endif
+
 static bool is_digit_str(const char *str)
 {
 	return strspn(str, "0123456789") == strlen(str);
@@ -493,6 +500,237 @@ static void remove_kswapd_load_stat_proc(void)
 #endif
 
 #ifdef CONFIG_COSTLY_ALLOC_MASK_RECLAIM
+#ifdef CONFIG_ORDER3_OPT
+static int g_order3_opt_status = 0; /* 0 for disabled, >0 for enabled, <0 for error*/
+static struct proc_dir_entry *order3_opt_entry;
+static struct proc_dir_entry *order3_pool_entry;
+
+#define POOL_ORDER PAGE_FRAG_CACHE_MAX_ORDER /* 3 */
+#define POOL_MAX_SIZE SZ_8M
+#define POOL_MAX_COUNT ((POOL_MAX_SIZE >> PAGE_SHIFT) >> POOL_ORDER)
+static LIST_HEAD(pool_page_list);
+static DEFINE_SPINLOCK(pool_lock);
+static unsigned int pool_count = 0;
+
+typedef void (*prep_new_page_t)(struct page *page, unsigned int order, gfp_t gfp_flags,
+												unsigned int alloc_flags);
+static prep_new_page_t prep_new_page_dup = NULL;
+typedef void (*wake_all_kswapds_t)(unsigned int order, gfp_t gfp_mask,
+									const struct alloc_context *ac);
+static wake_all_kswapds_t wake_all_kswapds_dup = NULL;
+
+static int order3_opt_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "%d\n", g_order3_opt_status);
+	return 0;
+}
+
+static int order3_opt_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, order3_opt_show, NULL);
+}
+
+static ssize_t order3_opt_write(struct file *file, const char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char kbuf[KBUF_LEN] = {0};
+	char *str;
+	int val;
+
+	if (g_order3_opt_status < 0) {
+		pr_warn("unabled to set order3_opt");
+		return -EINVAL;
+	}
+
+	if (count > KBUF_LEN - 1) {
+		pr_warn("input too long\n");
+		return -EINVAL;
+	}
+
+	if (copy_from_user(kbuf, buf, count))
+		return -EINVAL;
+
+	kbuf[count] = 0;
+	str = strstrip(kbuf);
+	if (!str) {
+		pr_warn("input empty\n");
+		return -EINVAL;
+	}
+
+	if (!is_digit_str(str)) {
+		pr_warn("input invalid, not a digit string\n");
+		return -EINVAL;
+	}
+
+	if (kstrtoint(str, 0, &val)) {
+		pr_warn("not a valid number\n");
+		return -EINVAL;
+	}
+
+	g_order3_opt_status = val;
+
+	return count;
+}
+
+static const struct proc_ops proc_order3_opt_ops = {
+	.proc_open = order3_opt_open,
+	.proc_read = seq_read,
+	.proc_write = order3_opt_write,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+};
+
+static int order3_pool_show(struct seq_file *m, void *v)
+{
+	if (g_order3_opt_status > 0)
+		seq_printf(m, "order=%d count=%u max=%u\n",
+				POOL_ORDER, pool_count, POOL_MAX_COUNT);
+	else
+		seq_printf(m, "disabled\n");
+
+	return 0;
+}
+
+static int order3_pool_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, order3_pool_show, NULL);
+}
+
+static const struct proc_ops proc_order3_pool_ops = {
+	.proc_open = order3_pool_open,
+	.proc_read = seq_read,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+};
+
+static void create_order3_opt_proc(void)
+{
+	order3_opt_entry = proc_create("oplus_mem/order3_opt",
+			0660, NULL, &proc_order3_opt_ops);
+
+	if (!order3_opt_entry) {
+		pr_err("order3_opt_proc create failed, ENOMEM\n");
+		return;
+	}
+
+	order3_pool_entry = proc_create("oplus_mem/order3_pool",
+			0660, NULL, &proc_order3_pool_ops);
+
+	if (!order3_pool_entry) {
+		proc_remove(order3_opt_entry);
+		pr_err("order3_opt_proc create failed, ENOMEM\n");
+		return;
+	}
+}
+
+static void remove_order3_opt_proc(void)
+{
+	if (order3_opt_entry) {
+		proc_remove(order3_opt_entry);
+		order3_opt_entry = NULL;
+	}
+
+	if (order3_pool_entry) {
+		proc_remove(order3_pool_entry);
+		order3_pool_entry = NULL;
+	}
+}
+
+static void __nocfi get_page_from_pool(void *data, gfp_t gfp_mask, int order, int alloc_flags,
+		int migratetype, struct page **p_page)
+{
+	struct page *page = NULL;
+	unsigned long flags;
+
+	if (g_order3_opt_status <= 0)
+		return;
+
+	if (order != POOL_ORDER || gfp_mask & __GFP_DMA32)
+		return;
+
+	/* someone else provided page */
+	if (*p_page)
+		return;
+
+	spin_lock_irqsave(&pool_lock, flags);
+	page = list_first_entry_or_null(&pool_page_list, struct page, lru);
+	if (page) {
+		list_del(&page->lru);
+		pool_count--;
+		prep_new_page_dup(page, order, gfp_mask & ~(__GFP_DIRECT_RECLAIM), ALLOC_WMARK_LOW);
+	} else {
+		struct alloc_context ac = { };
+		ac.highest_zoneidx = ZONE_NORMAL;
+		ac.zonelist = node_zonelist(numa_mem_id(), gfp_mask);
+		ac.nodemask = NULL;
+
+		pr_info_ratelimited("%s: %s:%d order3 pool is empty\n",
+				__func__, current->comm, current->pid);
+		wake_all_kswapds_dup(order, gfp_mask | __GFP_KSWAPD_RECLAIM, &ac);
+	}
+	spin_unlock_irqrestore(&pool_lock, flags);
+
+	*p_page = page;
+}
+
+static void pool_refill(void *data, struct page *page, int order,
+		int migratetype, bool *bypass)
+{
+	unsigned long flags;
+
+	if (g_order3_opt_status <= 0)
+		return;
+
+	/* we do not keep movable pages to avoid fragmentation */
+	if (order != POOL_ORDER || migratetype != MIGRATE_UNMOVABLE)
+		return;
+
+	/* someone else get the page */
+	if (*bypass)
+		return;
+
+	spin_lock_irqsave(&pool_lock, flags);
+	if (pool_count < POOL_MAX_COUNT) {
+		list_add_tail(&page->lru, &pool_page_list);
+		pool_count++;
+		*bypass = true;
+	}
+	spin_unlock_irqrestore(&pool_lock, flags);
+}
+
+static int pool_symbol_init(void)
+{
+	int ret;
+	struct kprobe prep_new_page_kp = {
+		.symbol_name = "prep_new_page"
+	};
+
+	struct kprobe wake_all_kswapds_kp = {
+		.symbol_name = "wake_all_kswapds"
+	};
+
+	ret = register_kprobe(&prep_new_page_kp);
+	if (ret) {
+		pr_err("get prep_new_page addr from kprobe failed! ret=%d\n", ret);
+		return ret;
+	}
+	prep_new_page_dup = (prep_new_page_t)prep_new_page_kp.addr;
+	pr_info("suceesfully get prep_new_page addr:0x%px\n", prep_new_page_dup);
+	unregister_kprobe(&prep_new_page_kp);
+
+	ret = register_kprobe(&wake_all_kswapds_kp);
+	if (ret) {
+		pr_err("get wake_all_kswapds addr from kprobe failed! ret=%d\n", ret);
+		return ret;
+	}
+	wake_all_kswapds_dup = (wake_all_kswapds_t)wake_all_kswapds_kp.addr;
+	pr_info("suceesfully get wake_all_kswapds addr:0x%px\n", wake_all_kswapds_dup);
+	unregister_kprobe(&wake_all_kswapds_kp);
+
+	return 0;
+}
+#endif /* CONFIG_ORDER3_OPT */
+
 DEFINE_STATIC_KEY_TRUE(costly_alloc_mask_reclaim);
 static bool g_mask_reclaim_enabled = true;
 static struct proc_dir_entry *mask_reclaim_entry;
@@ -568,6 +806,9 @@ static void create_mask_reclaim_proc(void)
 
 	if (!mask_reclaim_entry)
 		pr_err("costly_alloc_mask_reclaim_proc create failed, ENOMEM\n");
+#ifdef CONFIG_ORDER3_OPT
+	create_order3_opt_proc();
+#endif
 }
 
 static void remove_mask_reclaim_proc(void)
@@ -576,6 +817,9 @@ static void remove_mask_reclaim_proc(void)
 		proc_remove(mask_reclaim_entry);
 		mask_reclaim_entry = NULL;
 	}
+#ifdef CONFIG_ORDER3_OPT
+	remove_order3_opt_proc();
+#endif
 }
 
 static void mask_reclaim(void *data, gfp_t *alloc_gfp, unsigned int order)
@@ -583,7 +827,16 @@ static void mask_reclaim(void *data, gfp_t *alloc_gfp, unsigned int order)
 	if (!static_branch_likely(&costly_alloc_mask_reclaim))
 		return;
 
+#ifdef CONFIG_ORDER3_OPT
+	if ((g_order3_opt_status > 0) && (order == POOL_ORDER) && !(*alloc_gfp & __GFP_DMA32))
+		*alloc_gfp &= ~__GFP_KSWAPD_RECLAIM;
+#endif
+
+#if defined(CONFIG_QCOM_ALLOC_MASK_RECLAIM)
+	if (likely(order <= QCOM_ALLOC_MASK_RECLAIM_ORDER))
+#else
 	if (likely(order <= PAGE_ALLOC_COSTLY_ORDER))
+#endif
 		return;
 
 	*alloc_gfp &= ~__GFP_RECLAIM;
@@ -591,12 +844,61 @@ static void mask_reclaim(void *data, gfp_t *alloc_gfp, unsigned int order)
 
 static int register_customize_alloc_gfp(void)
 {
-	return register_trace_android_vh_customize_alloc_gfp(mask_reclaim, NULL);
+	int ret = 0;
+	ret = register_trace_android_vh_customize_alloc_gfp(mask_reclaim, NULL);
+	if (ret)
+		return ret;
+
+#ifdef CONFIG_ORDER3_OPT
+	ret = register_trace_android_vh_alloc_pages_failure_bypass(get_page_from_pool, NULL);
+	if (ret != 0) {
+		pr_err("register_trace_android_vh_alloc_pages_failure_bypass failed! ret=%d\n",
+				ret);
+		g_order3_opt_status = -1;
+		goto out;
+	}
+
+	ret = register_trace_android_vh_alloc_pages_reclaim_bypass(get_page_from_pool, NULL);
+	if (ret != 0) {
+		pr_err("register_trace_android_vh_alloc_pages_reclaim_bypass failed! ret=%d\n",
+				ret);
+		unregister_trace_android_vh_alloc_pages_failure_bypass(get_page_from_pool, NULL);
+		g_order3_opt_status = -1;
+		goto out;
+	}
+
+	ret = register_trace_android_vh_free_unref_page_bypass(pool_refill, NULL);
+	if (ret != 0) {
+		pr_err("register_trace_android_vh_free_page failed! ret=%d\n", ret);
+		unregister_trace_android_vh_alloc_pages_reclaim_bypass(get_page_from_pool, NULL);
+		unregister_trace_android_vh_alloc_pages_failure_bypass(get_page_from_pool, NULL);
+		g_order3_opt_status = -1;
+		goto out;
+	}
+
+	ret = pool_symbol_init();
+
+	if (ret != 0) {
+		pr_err("pool_symbol_init failed! ret=%d\n", ret);
+		unregister_trace_android_vh_free_unref_page_bypass(pool_refill, NULL);
+		unregister_trace_android_vh_alloc_pages_reclaim_bypass(get_page_from_pool, NULL);
+		unregister_trace_android_vh_alloc_pages_failure_bypass(get_page_from_pool, NULL);
+		g_order3_opt_status = -1;
+		goto out;
+	}
+out:
+#endif
+	return ret;
 }
 
 static void unregister_customize_alloc_gfp(void)
 {
 	unregister_trace_android_vh_customize_alloc_gfp(mask_reclaim, NULL);
+#ifdef CONFIG_ORDER3_OPT
+	unregister_trace_android_vh_free_unref_page_bypass(pool_refill, NULL);
+	unregister_trace_android_vh_alloc_pages_reclaim_bypass(get_page_from_pool, NULL);
+	unregister_trace_android_vh_alloc_pages_failure_bypass(get_page_from_pool, NULL);
+#endif
 }
 #else
 static int register_customize_alloc_gfp(void)

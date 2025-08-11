@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2024 Oplus. All rights reserved.
+ * Copyright (C) 2025 Oplus. All rights reserved.
  */
 
 #include <linux/minmax.h>
@@ -154,13 +154,13 @@ static enum hrtimer_restart frame_half_vsync_timeout(struct hrtimer *timer)
 
 void reset_frame_timer_by_grp(int grp_id)
 {
-	struct frame_info *info;
+	struct frame_info *info = fbg_active_multi_frame_info(grp_id);
 
-	info = fbg_active_multi_frame_info(grp_id);
-	if (info) {
-		stop_frame_half_vsync_timer(info, FRAME_STEP_DEFAULT);
-		stop_frame_step_timer(info, FRAME_STEP_DEFAULT);
-	}
+	if (!info || !info->ft)
+		return;
+
+	stop_frame_half_vsync_timer(info, FRAME_STEP_DEFAULT);
+	stop_frame_step_timer(info, FRAME_STEP_DEFAULT);
 }
 EXPORT_SYMBOL_GPL(reset_frame_timer_by_grp);
 

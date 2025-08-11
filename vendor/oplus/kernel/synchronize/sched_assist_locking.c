@@ -54,17 +54,6 @@ noinline int tracing_mark_write(const char *buf)
 	return 0;
 }
 
-inline bool test_task_is_fair(struct task_struct *task)
-{
-	if (unlikely(!task))
-		return false;
-
-	/* valid CFS priority is MAX_RT_PRIO..MAX_PRIO-1 */
-	if ((task->prio >= MAX_RT_PRIO) && (task->prio <= MAX_PRIO-1))
-		return true;
-	return false;
-}
-
 #ifndef CONFIG_LOCKING_LAST_ENTITY
 static DEFINE_PER_CPU(int, prev_locking_state);
 #else
@@ -190,7 +179,7 @@ void enqueue_locking_thread(struct rq *rq, struct task_struct *p)
 		return;
 
 	ots = get_oplus_task_struct(p);
-	orq = (struct oplus_rq *) rq->android_oem_data1;
+	orq = get_oplus_rq(rq);
 
 	if (IS_ERR_OR_NULL(ots) || !orq)
 		return;
@@ -231,7 +220,7 @@ void dequeue_locking_thread(struct rq *rq, struct task_struct *p)
 		return;
 
 	ots = get_oplus_task_struct(p);
-	orq = (struct oplus_rq *) rq->android_oem_data1;
+	orq = get_oplus_rq(rq);
 
 	if (IS_ERR_OR_NULL(ots) || !orq)
 		return;
@@ -283,7 +272,7 @@ void replace_next_task_fair_locking(struct rq *rq, struct task_struct **p,
 	if (!rq || !p || !se)
 		return;
 
-	orq = (struct oplus_rq *)rq->android_oem_data1;
+	orq = get_oplus_rq(rq);
 	if (!orq_has_locking_tasks(orq))
 		return;
 	spin_lock_irqsave(orq->locking_list_lock, irqflag);
@@ -366,7 +355,7 @@ void set_last_entity(struct task_struct *prev, struct task_struct *next, struct 
 		return;
 
 	if ((task_inlock(ots) && prev->se.on_rq == TASK_ON_RQ_QUEUED) && (test_task_is_rt(next) || test_task_ux(next))){
-		orq = (struct oplus_rq *) rq->android_oem_data1;
+		orq = get_oplus_rq(rq);
 		if (!orq->last_entity) {
 			orq->last_entity = &prev->se;
 			if (unlikely(global_debug_enabled & DEBUG_SYSTRACE)) {
@@ -391,7 +380,7 @@ void pick_last_entity(struct rq *rq, struct task_struct **p,
 	if (!rq || !p || !se)
 		return;
 
-	orq = (struct oplus_rq *)rq->android_oem_data1;
+	orq = get_oplus_rq(rq);
 	if (!orq)
 		return;
 
@@ -435,7 +424,7 @@ void clear_last_entity(struct rq *rq, struct task_struct *p)
 	if (!rq || !p)
 		return;
 
-	orq = (struct oplus_rq *) rq->android_oem_data1;
+	orq = get_oplus_rq(rq);
 	if (!orq)
 		return;
 

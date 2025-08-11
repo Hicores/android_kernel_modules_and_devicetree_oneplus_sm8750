@@ -9,6 +9,7 @@
 #include "frame_sync.h"
 #include "game_ctrl.h"
 #include "task_boost/heavy_task_boost.h"
+#include "critical_task_boost.h"
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_GEAS)
 #include <linux/bwmon_geas.h>
@@ -23,8 +24,6 @@ struct gameopt_frame_data* read_pointer = NULL;
 struct gameopt_frame_data produce_data;
 struct gameopt_frame_data consume_data;
 struct gameopt_frame_data tl_pred_data;
-
-#include "critical_task_boost.h"
 
 int epoll_notify(struct ctl_table* ro_table, int write, void* buffer, size_t* lenp, loff_t* ppos) {
     return 0;
@@ -71,12 +70,15 @@ static long sync_ctrl_ioctl(struct file* file, unsigned int cmd, unsigned long a
             data.mode = NOTIFY_FRAME_PRODUCE;
             produce_data = data;
             read_pointer = &produce_data;
+             /* read load data befor wakeup the user space */
+            cl_notify_frame_produce();
+            fl_notify_frame_produce();
             ret = notify_wait_fd();
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_GEAS)
             bwmon_on_frame_event(255, 1);
 #endif
-			htb_notify_frame_produce();
-			notify_frame_produdce();
+            htb_notify_frame_produce();
+            ctb_notify_frame_produce();
         break;
 
         case CMD_ID_GAMEOPT_EPOLL_CONSUME:
@@ -89,19 +91,21 @@ static long sync_ctrl_ioctl(struct file* file, unsigned int cmd, unsigned long a
         case CMD_ID_GAMEOPT_EPOLL_TLPRED:
             tl_pred_data = data;
             read_pointer = &tl_pred_data;
+            /* read load data befor wakeup the user space */
+            cl_notify_frame_produce();
+            fl_notify_frame_produce();
             ret = notify_wait_fd();
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_GEAS)
             bwmon_on_frame_event(255, 1);
 #endif
-			htb_notify_frame_produce();
-			notify_frame_produdce();
+            htb_notify_frame_produce();
+            ctb_notify_frame_produce();
         break;
 
         default:
             ret = reset_wait_event_cnt();
         break;
     }
-
     return ret;
 }
 
@@ -144,7 +148,7 @@ static int consume_open(struct inode *inode, struct file *file) {
 
 static int tl_pred_read(struct seq_file *m, void *v) {
     if (read_pointer != NULL) {
-        seq_printf(m, "%ld;%ld;%d;%d\n", read_pointer->timeStamp1, read_pointer->timeStamp2, read_pointer->bufferN, read_pointer->mode);
+        seq_printf(m, "%ld:%ld:%d:%d\n", read_pointer->timeStamp1, read_pointer->timeStamp2, read_pointer->bufferN, read_pointer->mode);
     }
     return 0;
 }

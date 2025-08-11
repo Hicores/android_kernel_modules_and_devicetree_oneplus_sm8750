@@ -13,6 +13,7 @@
 #include "frame_sync.h"
 #include "task_boost/heavy_task_boost.h"
 #include "critical_task_boost.h"
+#include "dsu_freq.h"
 
 struct proc_dir_entry *game_opt_dir = NULL;
 struct proc_dir_entry *early_detect_dir = NULL;
@@ -41,6 +42,7 @@ static int __init game_ctrl_init(void)
 	}
 
 	cpu_load_init();
+	frame_load_init();
 	cpufreq_limits_init();
 	early_detect_init();
 	task_util_init();
@@ -55,6 +57,7 @@ static int __init game_ctrl_init(void)
 	frame_sync_init();
 	heavy_task_boost_init();
 	hrtimer_boost_init();
+	dsu_freq_init();
 
 	return 0;
 }

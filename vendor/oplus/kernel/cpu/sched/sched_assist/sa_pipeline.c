@@ -23,13 +23,13 @@ static DEFINE_RAW_SPINLOCK(pipeline_lock);
 
 #if IS_ENABLED(CONFIG_SCHED_WALT)
 #define PIPELINE_MIGRATE_UTIL_DIFF 300
-#define SWAP_DIFF_DEFAULT_PERCENT 70
-#define COLOC_DEMAND_DEFAULT_CNT 10;
+#define DEFAULT_AMPLIFICATION_COEF 200
+#define DEFAULT_COLOC_DEMAND_CNT 2
 #define MAX_NEW_WALT_WINDOWN_CNT 3000
-static bool pipeline_prime_rearrange = false;
+static int pipeline_prime_rearrange = 0;
 static bool new_pipeline_task_set = true;
-static int swap_diff_percent = SWAP_DIFF_DEFAULT_PERCENT;
-static int coloc_demand_cnt = COLOC_DEMAND_DEFAULT_CNT;
+static int amplification_coef = DEFAULT_AMPLIFICATION_COEF;
+static int coloc_demand_cnt = DEFAULT_COLOC_DEMAND_CNT;
 static int walt_windown_cnt = 0;
 static unsigned int pipeline_prev_coloc_demand[MAX_PIPELINE_TASK_NUM] = {0, 0, 0, 0, 0, 0};
 static unsigned int pipeline_task_sum_util[MAX_PIPELINE_TASK_NUM] = {0, 0, 0, 0, 0, 0};
@@ -295,7 +295,9 @@ static inline bool task_can_run_on_prime_cpu(struct task_struct *task)
 		task_util = pipeline_task_util_trace(task);
 		prime_util = pipeline_task_util_trace(prime_task);
 
-		if ((task_util > prime_util) && (task_util - prime_util >= PIPELINE_MIGRATE_UTIL_DIFF))
+		if ((task_util > prime_util) &&
+			(task_util - prime_util >= PIPELINE_MIGRATE_UTIL_DIFF) &&
+			(task_util >= prime_util * amplification_coef / 100))
 			can = true;
 
 unlock:
@@ -315,22 +317,20 @@ void qcom_rearrange_pipeline_preferred_cpus(unsigned int divisor)
 	unsigned int task_util = 0;
 	unsigned int max_util = 0;
 	unsigned int prime_util = 0;
-	unsigned int diff_util = 0;
-	int diff_percent = 0;
 	int max_walt_windown_cnt;
 	unsigned long flags;
 
 	if (unlikely(!global_sched_assist_enabled))
 		return;
 
-	if (!pipeline_prime_rearrange)
+	if (pipeline_prime_rearrange <= 0)
 		return;
 
 	if ((pipeline_task_nr <= 1) || (prime_task == NULL))
 		return;
 
 	if (raw_spin_trylock_irqsave(&pipeline_lock, flags)) {
-		if (!pipeline_prime_rearrange)
+		if (pipeline_prime_rearrange <= 0)
 			goto unlock;
 
 		if ((pipeline_task_nr <= 1) || (prime_task == NULL))
@@ -405,21 +405,13 @@ void qcom_rearrange_pipeline_preferred_cpus(unsigned int divisor)
 		if ((max_util_task != NULL) &&
 				(max_util_task != prime_task) &&
 				(max_util > prime_util)) {
-			if (prime_util == 0) {
-				diff_percent = 100;
-			} else {
-				diff_util = max_util - prime_util;
-				if (diff_util >= prime_util)
-					diff_percent = 100;
-				else
-					diff_percent = (diff_util * 100) / prime_util;
-			}
-
-			if (diff_percent >= swap_diff_percent) {
-				atomic_set(&prime_ots->pipeline_cpu, atomic_read(&max_util_ots->pipeline_cpu));
-				atomic_set(&max_util_ots->pipeline_cpu, nr_cpu_ids - 1);
-				prime_task = max_util_task;
-				prime_ots = max_util_ots;
+			if (max_util >= prime_util * amplification_coef / 100) {
+				if (pipeline_prime_rearrange == 1) { /* pipeline_prime_rearrange > 1, only output debug info */
+					atomic_set(&prime_ots->pipeline_cpu, atomic_read(&max_util_ots->pipeline_cpu));
+					atomic_set(&max_util_ots->pipeline_cpu, nr_cpu_ids - 1);
+					prime_task = max_util_task;
+					prime_ots = max_util_ots;
+				}
 
 				if (unlikely(global_debug_enabled & DEBUG_PIPELINE)) {
 					systrace_c_printk("swap_prime_task", 1);
@@ -427,9 +419,6 @@ void qcom_rearrange_pipeline_preferred_cpus(unsigned int divisor)
 				}
 			}
 		}
-
-		if (unlikely(global_debug_enabled & DEBUG_PIPELINE))
-			systrace_c_printk("diff_percent", diff_percent);
 
 unlock:
 		raw_spin_unlock_irqrestore(&pipeline_lock, flags);
@@ -662,6 +651,8 @@ bool oplus_pipeline_task_skip_cpu(struct task_struct *task, unsigned int dst_cpu
 
 #if IS_ENABLED(CONFIG_SCHED_WALT)
 	/* dst_cpu == nr_cpu_ids - 1 */
+	if (pipeline_prime_rearrange > 0)
+		return true;
 	if (task_can_run_on_prime_cpu(task))
 		skip = false;
 #endif
@@ -679,6 +670,24 @@ debug:
 	return skip;
 }
 EXPORT_SYMBOL_GPL(oplus_pipeline_task_skip_cpu);
+
+bool oplus_pipeline_rt_skip_prime_cpu(unsigned int dst_cpu)
+{
+	if (unlikely(!global_sched_assist_enabled))
+		return false;
+
+	if (likely(prime_task == NULL))
+		return false;
+
+	if ((prime_cpu_num == 1) && (dst_cpu == nr_cpu_ids - 1))
+		return true;
+
+	if ((prime_cpu_num == 2) && ((dst_cpu == nr_cpu_ids - 1) || (dst_cpu == nr_cpu_ids - 2)))
+		return true;
+
+	return false;
+}
+EXPORT_SYMBOL_GPL(oplus_pipeline_rt_skip_prime_cpu);
 
 core_ctl_set_boost_t oplus_core_ctl_set_boost = NULL;
 EXPORT_SYMBOL_GPL(oplus_core_ctl_set_boost);
@@ -779,7 +788,8 @@ static ssize_t pipeline_pids_proc_write(struct file *file,
 				task = pipeline_task[i];
 				ots = pipeline_ots[i];
 				atomic_set(&ots->pipeline_cpu, -1);
-				oplus_set_ux_state_lock(task, 0, -1, true);
+				if (!test_bit(IM_FLAG_AUDIO, &ots->im_flag))
+					oplus_set_ux_state_lock(task, 0, -1, true);
 
 				/* get_pid_task have called get_task_struct, now call put_task_struct */
 				put_task_struct(task);
@@ -908,7 +918,7 @@ static ssize_t pipeline_prime_proc_write(struct file *file,
 	char buffer[128] = {0};
 	int ret;
 	int rearrange;
-	int percent = -1;
+	int amp_coef = -1;
 	int cnt = -1;
 	unsigned long flags;
 
@@ -916,23 +926,23 @@ static ssize_t pipeline_prime_proc_write(struct file *file,
 	if (ret <= 0)
 		return ret;
 
-	ret = sscanf(buffer, "%d %d %d", &rearrange, &percent, &cnt);
+	ret = sscanf(buffer, "%d %d %d", &rearrange, &amp_coef, &cnt);
 	if (ret < 1)
 		return -EINVAL;
 
 	mutex_lock(&p_mutex);
 	raw_spin_lock_irqsave(&pipeline_lock, flags);
-	pipeline_prime_rearrange = !!rearrange;
+	pipeline_prime_rearrange = rearrange;
 
-	if (percent > 0 && percent <= 100)
-		swap_diff_percent = percent;
+	if (amp_coef > 100 && amp_coef <= 500)
+		amplification_coef = amp_coef;
 	else
-		swap_diff_percent = SWAP_DIFF_DEFAULT_PERCENT;
+		amplification_coef = DEFAULT_AMPLIFICATION_COEF;
 
-	if (cnt > 0 && cnt <= 20)
+	if (cnt > 0 && cnt <= 50)
 		coloc_demand_cnt = cnt;
 	else
-		coloc_demand_cnt = COLOC_DEMAND_DEFAULT_CNT;
+		coloc_demand_cnt = DEFAULT_COLOC_DEMAND_CNT;
 	raw_spin_unlock_irqrestore(&pipeline_lock, flags);
 	mutex_unlock(&p_mutex);
 
@@ -946,8 +956,8 @@ static ssize_t pipeline_prime_proc_read(struct file *file,
 	int len;
 
 	mutex_lock(&p_mutex);
-	len = sprintf(buffer, "%d %d %d\n", pipeline_prime_rearrange? 1 : 0,
-		swap_diff_percent, coloc_demand_cnt);
+	len = sprintf(buffer, "%d %d %d\n", pipeline_prime_rearrange,
+		amplification_coef, coloc_demand_cnt);
 	mutex_unlock(&p_mutex);
 
 	return simple_read_from_buffer(buf, count, ppos, buffer, len);

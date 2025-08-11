@@ -30,6 +30,8 @@ extern unsigned long long g_sched_debug;
 
 #define CURRENT_TASK_PID				-1
 #define SYSTEM_SERVER_NAME              "system_server"
+#define SURFACEFLINGER_NAME		"surfaceflinger"
+#define SF_BCKGRNDEXEC_THREAD_NAME	"BckgrndExec HP"
 #define BD_FEATURE_MASK                 0xffffffff
 
 extern unsigned int g_sched_enable;
@@ -107,8 +109,8 @@ enum {
 	LOG_SET_ASYNC_UX	= 1U << 3,
 	LOG_TRACK_ASYNC_UX	= 1U << 4,
 	LOG_SET_SYNC_UX		= 1U << 5,
-	LOG_GET_LAST_ASYNC	= 1U << 6,
-	LOG_TRACK_LAST_ASYNC	= 1U << 7,
+	LOG_GET_SELECT_TASK	= 1U << 6,
+	LOG_TRACK_SELECT_TASK	= 1U << 7,
 	LOG_SET_ASYNC_AFTER_PENDING	= 1U << 8,
 	LOG_SET_SF_UX	= 1U << 9,
 	LOG_FG_LIST_LVL0	= 1U << 10,
@@ -150,7 +152,11 @@ enum {
 	STATE_FG_VIP_THREAD_SKIP = 29,
 	STATE_PENDING_ASYNC = 30,
 	STATE_MAX_DEPTH_NOT_SET_UX = 31,
-	STATE_TASK_STRUCT_STATE = 100,
+	STATE_NOT_SET_NO_THREAD = 32,
+	STATE_NOT_SET_NO_THREAD_ERR = 33,
+	STATE_USER_SET_ASYNC_UX = 33,
+	STATE_MAX_UX_FOR_SET_RANDOM = 34,
+	STATE_TASK_STRUCT_STATE = 200,
 	STATE_SYNC_SET_UX = 50,
 	STATE_SYNC_RESET_UX = 51,
 	STATE_SYNC_RT_SET_UX = 52,
@@ -159,6 +165,7 @@ enum {
 	STATE_ASYNC_SET_UX_AFTER_NO_THREAD = 55,
 	STATE_SYNC_SET_UX_AGAIN_SERVICEMG = 56,
 	STATE_SYNC_RESET_UX_SERVICEMG = 57,
+	STATE_SET_RANDOM_UX_NO_THREAD = 58,
 };
 
 enum {
@@ -216,5 +223,16 @@ static inline void oplus_bd_feat_enable(unsigned int bd_feat, bool enable)
 
 void binder_ux_state_systrace(struct task_struct *from, struct task_struct *target,
 	int ux_state, int systrace_lvl, struct binder_transaction *t, struct binder_proc *proc);
+
+enum {
+	GET_TASK_WHEN_SYNC_NO_THREAD,
+	GET_TASK_WHEN_ASYNC_NO_THREAD,
+	GET_TASK_WHEN_PENDING_ASYNC,
+};
+
+#define CHECK_MAX_NODE_FOR_ASYNC_THREAD	400
+#define MAX_SELECTED_TASK	5
+#define MAX_UX_THREAD_FOR_SET_RANDOM	5
+#define DESIRED_SELECT_TASK_NUM	1
 
 #endif /* _OPLUS_BINDER_SCHED_H_ */

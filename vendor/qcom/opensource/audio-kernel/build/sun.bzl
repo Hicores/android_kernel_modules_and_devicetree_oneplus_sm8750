@@ -50,6 +50,8 @@ def define_sun():
             "oplus_audio_sipa",
             "oplus_audio_sipa_tuning",
             "oplus_audio_pa_manager",
+#add for oplus audio aw87xxx driver
+            "oplus_audio_aw87xxx",
 #endif /* OPLUS_ARCH_EXTENDS */
 #ifdef CONFIG_AUDIO_DAEMON_KERNEL_QCOM
 #add for oplus audio daemon kernel

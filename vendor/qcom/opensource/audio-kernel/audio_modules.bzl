@@ -712,4 +712,21 @@ audio_modules.register(
     ],
     deps = [":audio_netlink_headers"],
 )
+# >>>>  AW87XXX PA MODULES <<<<
+audio_modules.register(
+    name = "oplus_audio_aw87xxx",
+    path = "oplus/codecs/aw87xxx",
+    config_option = "CONFIG_SND_SOC_AW87XXX",
+    srcs = [
+        "aw87xxx.c",
+        "aw87xxx_acf_bin.c",
+        "aw87xxx_bin_parse.c",
+        "aw87xxx_device.c",
+        "aw87xxx_dsp.c",
+        "aw87xxx_monitor.c",
+    ],
+    deps = [":aw87xxx_headers",
+            ":oplus_speaker_headers",
+            ":%b_oplus_audio_pa_manager",],
+)
 #endif /* OPLUS_ARCH_EXTENDS */

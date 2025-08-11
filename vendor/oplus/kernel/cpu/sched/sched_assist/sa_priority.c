@@ -11,6 +11,10 @@
 #include "sa_common.h"
 #include "sa_priority.h"
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
+#include "sa_ddl.h"
+#endif
+
 #define UX_NICE_0_LOAD  1024
 #define WMULT_CONST (~0U)
 #define WMULT_SHIFT 32
@@ -701,7 +705,7 @@ void android_vh_sched_stat_runtime_handler(void *unused, struct task_struct *tas
 #endif
 
 	rq = task_rq(task);
-	orq = (struct oplus_rq *)rq->android_oem_data1;
+	orq = get_oplus_rq(rq);
 	ots = get_oplus_task_struct(task);
 	if (IS_ERR_OR_NULL(ots)) {
 		return;
@@ -761,4 +765,13 @@ void android_vh_sched_stat_runtime_handler(void *unused, struct task_struct *tas
 
 out:
 	spin_unlock_irqrestore(orq->ux_list_lock, irqflag);
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
+	/* Ensure the calling here after the oplus_task_ddl_tint */
+	if (!READ_ONCE(task->on_cpu))
+		return;
+
+	if (ots->ddl_active_ts && !oplus_ddl_within_limit(rq, task))
+		resched_curr(rq);
+#endif
 }

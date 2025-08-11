@@ -26,8 +26,8 @@
 #include "zstd_double_fast.h"
 #include "zstd_lazy.h"
 #include "zstd_opt.h"
-#include "zstd_ldm.h"
-#include "zstd_compress_superblock.h"
+#include "../compress/zstd_ldm.h"
+#include "../compress/zstd_compress_superblock.h"
 
 /* ***************************************************************
 *  Tuning parameters

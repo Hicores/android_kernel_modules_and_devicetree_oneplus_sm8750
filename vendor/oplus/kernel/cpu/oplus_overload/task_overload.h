@@ -10,7 +10,7 @@
 #include <linux/cpufreq.h>
 #include <linux/sched.h>
 
-#define ABNORMAL_THRESHOLD (2500)
+#define ABNORMAL_THRESHOLD (1250)
 #define ABNORMAL_TIME (10)
 
 struct abnormal_tsk_info {
