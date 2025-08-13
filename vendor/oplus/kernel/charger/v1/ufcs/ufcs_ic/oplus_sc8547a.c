@@ -1032,6 +1032,8 @@ static irqreturn_t sc8547a_charger_interrupt(int irq, void *dev_id)
 		ret = sc8547_protect_interrupt_handler(chip);
 		break;
 	case CP_WORKMODE_UFCS:
+		if (!chip_protocol)
+			return IRQ_HANDLED;
 		kthread_queue_work(chip_protocol->wq, &chip_protocol->rcv_work);
 		break;
 	default:

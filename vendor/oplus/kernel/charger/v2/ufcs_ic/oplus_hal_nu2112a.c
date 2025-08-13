@@ -1920,6 +1920,33 @@ static int nu2112a_cp_wd_enable(struct oplus_chg_ic_dev *ic_dev, int timeout_ms)
 	return 0;
 }
 
+static int nu2112a_cp_set_ucp_disable(struct oplus_chg_ic_dev *ic_dev, bool disable)
+{
+	struct nu2112a_device *chip;
+	int ret = 0;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_priv_data(ic_dev);
+
+	chg_info("%s %s\n", chip->dev->of_node->name, disable ? "disable" : "enable");
+	if (disable)
+		ret = nu2112a_update_bits(chip->client, NU2112A_REG_0C,
+				NU2112A_IBUS_UCP_DIS_MASK, NU2112A_IBUS_UCP_DISABLE << NU2112A_IBUS_UCP_DIS_SHIFT);
+	else
+		ret = nu2112a_update_bits(chip->client, NU2112A_REG_0C,
+				NU2112A_IBUS_UCP_DIS_MASK, NU2112A_IBUS_UCP_ENABLE << NU2112A_IBUS_UCP_DIS_SHIFT);
+
+	if (ret < 0) {
+		chg_err("failed to set ucp reg disable to 0x%02x, ret=%d\n", disable, ret);
+		return ret;
+	}
+
+	return 0;
+}
+
 static void *nu2112a_cp_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus_chg_ic_func func_id)
 {
 	void *func = NULL;
@@ -1985,6 +2012,9 @@ static void *nu2112a_cp_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus_chg
 		break;
 	case OPLUS_IC_FUNC_CP_SET_ADC_ENABLE:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_SET_ADC_ENABLE, nu2112a_cp_adc_enable);
+		break;
+	case OPLUS_IC_FUNC_CP_SET_UCP_DISABLE:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_SET_UCP_DISABLE, nu2112a_cp_set_ucp_disable);
 		break;
 	case OPLUS_IC_FUNC_CP_WATCHDOG_ENABLE:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_WATCHDOG_ENABLE, nu2112a_cp_wd_enable);

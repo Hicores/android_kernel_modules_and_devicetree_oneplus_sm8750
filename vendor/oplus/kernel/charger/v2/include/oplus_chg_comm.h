@@ -20,8 +20,12 @@
 #define SOFT_REST_RETRY_MAX_CNT			2
 #define OPLUS_BMS_HEAT_THRE			250
 #define SALE_MODE_COOL_DOWN_VAL		1
+#define SALE_MODE_COOL_DOWN_THREE_VAL 4
 #define SALE_MODE_COOL_DOWN		501
 #define SALE_MODE_COOL_DOWN_TWO		502
+/* add 503 for high power consumption and
+  high impedance burglar alarm device */
+#define SALE_MODE_COOL_DOWN_THREE	503
 
 enum oplus_temp_region {
 	TEMP_REGION_COLD = 0,
@@ -182,4 +186,5 @@ int oplus_set_chg_up_limit(struct oplus_mms *topic, int charge_limit_enable, int
     int is_force_set_charge_limit, int charge_limit_recharge_value, int callname);
 void oplus_comm_set_anti_expansion_status(struct oplus_mms *topic,int val);
 int oplus_comm_get_dis_ui_power_state(struct oplus_mms *topic);
+bool oplus_comm_get_hmac_not_pop_up(struct oplus_mms *topic);
 #endif /* __OPLUS_CHG_COMM_H__ */

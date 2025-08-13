@@ -18,6 +18,7 @@ def define_oplus_local_modules():
             "game_ctrl.c",
             "rt_info.c",
             "task_util.c",
+            "yield_opt.c",
         ]),
 
         includes = ["."],

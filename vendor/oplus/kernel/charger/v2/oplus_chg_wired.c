@@ -55,6 +55,7 @@
 #define PDQC_BUCK_VBUS_THR		7500
 #define OPLUS_CHG_500_CHARGING_CURRENT	500
 #define OPLUS_CHG_900_CHARGING_CURRENT	900
+#define OPLUS_CHG_2000_CHARGING_CURRENT 2000
 #define OPLUS_CHG_VBUS_5V		5000
 #define OPLUS_CHG_VBUS_9V		9000
 #define OPLUS_CHG_SHUTDOWN_WAIT		100
@@ -494,6 +495,8 @@ static int oplus_wired_current_set(struct oplus_chg_wired *chip,
 			cool_down_curr = OPLUS_CHG_900_CHARGING_CURRENT;
 		else if (chip->chg_ctrl_by_sale_mode == SALE_MODE_COOL_DOWN_TWO)
 			cool_down_curr = OPLUS_CHG_500_CHARGING_CURRENT;
+		else if (chip->chg_ctrl_by_sale_mode == SALE_MODE_COOL_DOWN_THREE)
+			cool_down_curr = OPLUS_CHG_2000_CHARGING_CURRENT;
 		chg_info("sale mode enter: %d\n", chip->chg_ctrl_by_sale_mode);
 	}
 
@@ -548,11 +551,13 @@ static int oplus_wired_current_set(struct oplus_chg_wired *chip,
 	if (led_on && cool_down_curr > 0) {
 		if (chip->chg_ctrl_by_sale_mode &&
 		    (chip->chg_mode == OPLUS_WIRED_CHG_MODE_QC ||
-		    chip->chg_mode == OPLUS_WIRED_CHG_MODE_PD))
+		    chip->chg_mode == OPLUS_WIRED_CHG_MODE_PD)) {
 			vote(chip->icl_votable, SALE_MODE_VOTER,
 			     true, spec->cool_down_sale_pdqc_curr_ma, true);
-		else
+			cool_down_curr = spec->cool_down_sale_pdqc_curr_ma;
+		} else {
 			vote(chip->icl_votable, SALE_MODE_VOTER, false, 0, true);
+		}
 		vote(chip->icl_votable, COOL_DOWN_VOTER, true, cool_down_curr, true);
 	} else {
 		vote(chip->icl_votable, COOL_DOWN_VOTER, false, 0, true);

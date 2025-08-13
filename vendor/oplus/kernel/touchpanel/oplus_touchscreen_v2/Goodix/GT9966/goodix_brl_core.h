@@ -221,6 +221,8 @@
 
 #define GOODIX_CMD_REG                  0x10174
 
+#define GTP_SCENE_TYPE_MASK             7
+#define GTP_HIGH_LOCK_GAME              0x02
 #define GTP_MASK_ENABLE                 0x01
 #define GTP_MASK_DISABLE                0x00
 /****************************Start of auto test ********************/

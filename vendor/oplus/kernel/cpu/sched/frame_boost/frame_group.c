@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2020-2024 Oplus. All rights reserved.
+ * Copyright (C) 2020-2025 Oplus. All rights reserved.
  */
 
 #include <linux/sched.h>
@@ -2466,7 +2466,8 @@ bool set_frame_group_task_to_perfer_cpu(struct task_struct *p, int *target_cpu)
 	bool walk_next_cls = false;
 	struct oplus_sched_cluster *cluster = NULL;
 	cpumask_t search_cpus = CPU_MASK_NONE;
-	unsigned long spare_cap = 0, max_spare_cap = 0;
+	long spare_cap = 0;
+	long max_spare_cap = -1;
 	int max_spare_cap_cpu = -1, backup_cpu = -1;
 	struct frame_group *grp = NULL;
 	struct oplus_task_struct *ots = get_oplus_task_struct(p);
@@ -2544,6 +2545,10 @@ bool set_frame_group_task_to_perfer_cpu(struct task_struct *p, int *target_cpu)
 		cluster = fb_cluster[start_cls];
 	}
 
+	/* In case preferred_cluster->cpus are inactive, give it a try to walk_next_cls */
+	if ((grp != NULL) && (cluster == grp->preferred_cluster))
+		walk_next_cls = true;
+
 retry:
 	cpumask_and(&search_cpus, p->cpus_ptr, cpu_active_mask);
 #ifdef CONFIG_OPLUS_ADD_CORE_CTRL_MASK
@@ -2551,10 +2556,6 @@ retry:
 		cpumask_andnot(&search_cpus, &search_cpus, fbg_cpu_halt_mask);
 #endif /* CONFIG_OPLUS_ADD_CORE_CTRL_MASK */
 	cpumask_and(&search_cpus, &search_cpus, &cluster->cpus);
-
-	/* In case preferred_cluster->cpus are inactive, give it a try to walk_next_cls */
-	if ((grp != NULL) && (cluster == grp->preferred_cluster))
-		walk_next_cls = true;
 
 	for_each_cpu(iter_cpu, &search_cpus) {
 		struct rq *rq = NULL;

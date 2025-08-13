@@ -1107,6 +1107,8 @@ struct touchpanel_data {
 	int fp_up_time;
 	int fp_down_cnt;
 	int fp_up_cnt;
+	bool fp_unlock_status_support;
+	u8  fp_unlock_status;
 
 	/******For pm suspend and resume area********/
 	bool bus_ready;                                     /*spi or i2c resume status*/
@@ -1452,6 +1454,7 @@ struct oplus_touchpanel_operations {
 	int (*set_high_frame_rate)(void *chip_data, int value, int time);
 	void (*notify_pencil_type)(void *chip_data, uint8_t value);
 	int (*notify_keyboard_open)(void *chip_data);
+	int (*fp_unlock_status_write)(void *chip_data, uint8_t value); /*fp unlock status*/
 	void (*get_pen_points)       (void *chip_data, struct pen_info *pen_info);
 	int (*pen_uplink_msg)(void *chip_data, u32 buf_len, u8 *buf, u32 *out_len);
 	int (*pen_downlink_msg)(void *chip_data, u32 cmd, u32 buf_len, u8 *buf);

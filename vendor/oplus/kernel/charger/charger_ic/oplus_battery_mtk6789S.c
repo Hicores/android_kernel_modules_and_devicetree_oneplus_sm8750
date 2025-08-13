@@ -936,7 +936,9 @@ static bool is_charger_exist(struct mtk_charger *info)
 
 static int get_charger_type(struct mtk_charger *info)
 {
-	union power_supply_propval prop, prop2, prop3;
+	union power_supply_propval prop = {0};
+	union power_supply_propval prop2 = {0};
+	union power_supply_propval prop3 = {0};
 	static struct power_supply *chg_psy;
 	int ret;
 
@@ -2842,15 +2844,7 @@ static ssize_t sc_stime_store(
 	if (buf != NULL && size != 0) {
 		chr_err("[smartcharging stime] buf is %s\n", buf);
 		ret = kstrtoul(buf, 10, &val);
-		if (val < 0) {
-			chr_err(
-				"[smartcharging stime] val is %d ??\n",
-				(int)val);
-			val = 0;
-		}
-
-		if (val >= 0)
-			info->sc.start_time = val;
+		info->sc.start_time = val;
 
 		chr_err(
 			"[smartcharging stime]enable smartcharging=%d\n",
@@ -2966,18 +2960,9 @@ static ssize_t sc_tuisoc_store(
 	if (buf != NULL && size != 0) {
 		chr_err("[smartcharging tuisoc] buf is %s\n", buf);
 		ret = kstrtoul(buf, 10, &val);
-		if (val < 0) {
-			chr_err(
-				"[smartcharging tuisoc] val is %d ??\n",
-				(int)val);
-			val = 0;
-		}
-
-		if (val >= 0)
-			info->sc.target_percentage = val;
-
+		info->sc.target_percentage = val;
 		chr_err(
-			"[smartcharging stime]tuisoc=%d\n",
+			"[smartcharging tuisoc]tuisoc=%d\n",
 			info->sc.target_percentage);
 	}
 	return size;
@@ -3028,16 +3013,7 @@ static ssize_t sc_ibat_limit_store(
 	if (buf != NULL && size != 0) {
 		chr_err("[smartcharging ibat limit] buf is %s\n", buf);
 		ret = kstrtoul(buf, 10, &val);
-		if (val < 0) {
-			chr_err(
-				"[smartcharging ibat limit] val is %d ??\n",
-				(int)val);
-			val = 0;
-		}
-
-		if (val >= 0)
-			info->sc.current_limit = val;
-
+		info->sc.current_limit = val;
 		chr_err(
 			"[smartcharging ibat limit]=%d\n",
 			info->sc.current_limit);

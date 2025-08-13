@@ -225,6 +225,10 @@ int oplus_adfr_init(void *dsi_panel)
 		}
 	}
 
+	/* oplus,adfr-oa-use-fixed-te */
+	p_oplus_adfr_params->oa_use_fixed_te = utils->read_bool(utils->data, "oplus,adfr-oa-use-fixed-te");
+	ADFR_INFO("oa use fixed te: %d\n", p_oplus_adfr_params->oa_use_fixed_te);
+
 	ADFR_INFO("oplus_adfr_config:0x%x\n", p_oplus_adfr_params->config);
 	OPLUS_ADFR_TRACE_INT("oplus_adfr_config", p_oplus_adfr_params->config);
 
@@ -438,6 +442,39 @@ static bool oplus_adfr_decreasing_step_is_enabled(void *oplus_adfr_params)
 	}
 
 	return (bool)(OPLUS_ADFR_GET_DECREASING_STEP_CONFIG(p_oplus_adfr_params->config));
+}
+
+bool oplus_adfr_is_oa_use_fixed_te(void *sde_encoder_phys)
+{
+	struct sde_encoder_phys *phys_enc = sde_encoder_phys;
+	struct sde_connector *c_conn = NULL;
+	struct dsi_display *display = NULL;
+	struct oplus_adfr_params *p_oplus_adfr_params = NULL;
+
+	if (!phys_enc || !phys_enc->connector) {
+		ADFR_ERR("invalid phys_enc params\n");
+		return false;
+	}
+
+	c_conn = to_sde_connector(phys_enc->connector);
+	if (!c_conn) {
+		ADFR_ERR("invalid c_conn param\n");
+		return false;
+	}
+
+	display = c_conn->display;
+	if (!display || !display->panel) {
+		ADFR_ERR("invalid display params\n");
+		return false;
+	}
+
+	p_oplus_adfr_params = oplus_adfr_get_params(display->panel);
+	if (!p_oplus_adfr_params) {
+		ADFR_ERR("invalid p_oplus_adfr_params param\n");
+		return false;
+	}
+
+	return (bool)(p_oplus_adfr_params->oa_use_fixed_te);
 }
 
 /* -------------------- standard adfr -------------------- */

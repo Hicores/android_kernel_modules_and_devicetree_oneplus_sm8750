@@ -133,7 +133,6 @@ struct oplus_configfs_device {
 	bool pps_online_keep;
 	bool pps_charging;
 	bool pps_oplus_adapter;
-	u32 pps_adapter_id;
 
 	int vbat_uv_thr;
 	int real_cool_down;
@@ -602,7 +601,12 @@ static struct device_attribute *oplus_usb_attributes[] = {
 static ssize_t authenticate_show(struct device *dev,
 				 struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d\n", oplus_gauge_get_batt_authenticate());
+	struct oplus_configfs_device *chip = dev->driver_data;
+
+	if (is_comm_topic_available(chip) && oplus_comm_get_hmac_not_pop_up(chip->comm_topic))
+		return sprintf(buf, "%d\n", true);
+	else
+		return sprintf(buf, "%d\n", oplus_gauge_get_batt_authenticate());
 }
 static DEVICE_ATTR_RO(authenticate);
 
@@ -988,6 +992,9 @@ static ssize_t cool_down_store(struct device *dev,
 	if (val == SALE_MODE_COOL_DOWN || val == SALE_MODE_COOL_DOWN_TWO) {
 		chip->real_cool_down = val;
 		val = SALE_MODE_COOL_DOWN_VAL;
+	} else if (val == SALE_MODE_COOL_DOWN_THREE) {
+		chip->real_cool_down = val;
+		val = SALE_MODE_COOL_DOWN_THREE_VAL;
 	} else {
 		chip->real_cool_down = 0;
 	}
@@ -1339,7 +1346,7 @@ static ssize_t ppschg_ing_show(struct device *dev,
 			val = PROTOCOL_CHARGING_UFCS_THIRD;
 	} else 	if (chip->pps_online || chip->pps_online_keep) {
 		if (chip->pps_oplus_adapter)
-			val = oplus_pps_adapter_id_to_protocol_type(chip->pps_adapter_id);
+			val = PROTOCOL_CHARGING_PPS_OPLUS;
 		else
 			val = PROTOCOL_CHARGING_PPS_THIRD;
 	}
@@ -1357,10 +1364,7 @@ static ssize_t ppschg_power_show(struct device *dev,
 	if (chip->ufcs_online) {
 		power = oplus_ufcs_get_ufcs_power(chip->ufcs_topic);
 	} else 	if (chip->pps_online || chip->pps_online_keep) {
-		if (chip->pps_oplus_adapter)
-			power = oplus_pps_adapter_id_to_power(chip->pps_adapter_id);
-		else
-			power = oplus_pps_adapter_id_to_power(PPS_FASTCHG_TYPE_THIRD);
+		power = oplus_pps_get_charging_power_watt(chip->pps_topic);
 	}
 
 	return sprintf(buf, "%d\n", power);
@@ -1558,6 +1562,9 @@ static ssize_t bcc_current_store(struct device *dev, struct device_attribute *at
 	}
 
 	oplus_wired_set_bcc_curr_request(chip->wired_topic);
+
+	if (chip->wls_online)
+		oplus_wired_check_bcc_curr_done(chip->wired_topic);
 
 	/* oplus_wired_get_bcc_curr_done_status(); */
 
@@ -2755,17 +2762,16 @@ static void oplus_configfs_plc_enable_work(struct work_struct *work)
 	if (!chip->plc_user_enable || !chip->wired_online)
 		return;
 
-	if (chip->plc_status != PLC_STATUS_DISABLE)
-		goto err;
+	if (chip->plc_status == PLC_STATUS_NOT_ALLOW) {
+		chip->plc_user_enable = false;
+		chg_err("status not allow, change plc_user_enable to false\n");
+		return;
+	}
 
 	chg_info("enable plc by kernel\n");
 	rc = oplus_chg_plc_enable(chip->plc_topic, true);
 	if (rc < 0)
 		chg_err("plc enable error, rc=%d\n", rc);
-	return;
-
-err:
-	chip->plc_user_enable = false;
 }
 
 #define CLEAN_PLC_ENABLE_DELAY_MS 1600
@@ -2858,10 +2864,7 @@ static int get_adapter_power(struct oplus_configfs_device *chip)
 	} else if (chip->ufcs_online) {
 		power = oplus_ufcs_get_ufcs_power(chip->ufcs_topic) * 1000;
 	} else 	if (chip->pps_online || chip->pps_online_keep) {
-		if (chip->pps_oplus_adapter)
-			power = oplus_pps_adapter_id_to_power(chip->pps_adapter_id) * 1000;
-		else
-			power = oplus_pps_adapter_id_to_power(PPS_FASTCHG_TYPE_THIRD) * 1000;
+		power = oplus_pps_get_adapter_power_mw(chip->pps_topic);
 	} else if (chip->vooc_online) {
 		if (fast_chg_type_by_user > 0) {
 			cur_sid = oplus_adapter_id_to_sid(chip->vooc_topic, fast_chg_type_by_user);
@@ -3113,13 +3116,11 @@ static ssize_t ui_power_show(struct device *dev,
 		pps_or_ufcs_power = oplus_ufcs_get_ufcs_power(chip->ufcs_topic);
 	} else 	if (chip->pps_online || chip->pps_online_keep) {
 		if (chip->pps_oplus_adapter) {
-			pps_or_ufcs_ing = oplus_pps_adapter_id_to_protocol_type(chip->pps_adapter_id);
-			if (pps_or_ufcs_ing)
-				pps_or_ufcs_power = oplus_pps_adapter_id_to_power(chip->pps_adapter_id);
+			pps_or_ufcs_ing = PROTOCOL_CHARGING_PPS_OPLUS;
 		} else {
 			pps_or_ufcs_ing = PROTOCOL_CHARGING_PPS_THIRD;
-			pps_or_ufcs_power = oplus_pps_adapter_id_to_power(PPS_FASTCHG_TYPE_THIRD);
 		}
+		pps_or_ufcs_power = oplus_pps_get_charging_power_watt(chip->pps_topic);
 	}
 
 	if (pps_or_ufcs_ing > 0)
@@ -3142,10 +3143,10 @@ static ssize_t ui_power_show(struct device *dev,
 
 	if (pre_ui_power != ui_power) {
 		pre_ui_power = ui_power;
-		chg_info("ui_power_show %d %d %d %d %d, %d %d %d %d, %d %d %d %d\n",
+		chg_info("ui_power_show %d %d %d %d %d, %d %d %d %d, %d %d %d\n",
 			  adapter_power, project_power, chip->ufcs_online, chip->pps_online, chip->pps_online_keep,
 			  chip->ufcs_oplus_adapter, chip->pps_oplus_adapter, pps_or_ufcs_ing, pps_or_ufcs_power,
-			  ui_power, chip->ufcs_adapter_id, chip->pps_adapter_id, ui_power_by_user);
+			  ui_power, chip->ufcs_adapter_id, ui_power_by_user);
 	}
 	return sprintf(buf, "%u\n", ui_power);
 }
@@ -3230,13 +3231,11 @@ static ssize_t cpa_power_show(struct device *dev,
 		pps_or_ufcs_power = oplus_ufcs_get_ufcs_power(chip->ufcs_topic);
 	} else 	if (chip->pps_online || chip->pps_online_keep) {
 		if (chip->pps_oplus_adapter) {
-			pps_or_ufcs_ing = oplus_pps_adapter_id_to_protocol_type(chip->pps_adapter_id);
-			if (pps_or_ufcs_ing)
-				pps_or_ufcs_power = oplus_pps_adapter_id_to_power(chip->pps_adapter_id);
+			pps_or_ufcs_ing = PROTOCOL_CHARGING_PPS_OPLUS;
 		} else {
 			pps_or_ufcs_ing = PROTOCOL_CHARGING_PPS_THIRD;
-			pps_or_ufcs_power = oplus_pps_adapter_id_to_power(PPS_FASTCHG_TYPE_THIRD);
 		}
+		pps_or_ufcs_power = oplus_pps_get_charging_power_watt(chip->pps_topic);
 	}
 
 	if (pps_or_ufcs_ing > 0)
@@ -3251,10 +3250,10 @@ static ssize_t cpa_power_show(struct device *dev,
 
 	if (pre_cpa_power != cpa_power) {
 		pre_cpa_power = cpa_power;
-		chg_info("ui_power_show %d %d %d %d, %d %d %d %d, %d %d %d %d\n",
+		chg_info("ui_power_show %d %d %d %d, %d %d %d %d, %d %d %d\n",
 			  adapter_power, project_power, chip->ufcs_online, chip->pps_online,
 			  chip->ufcs_oplus_adapter, chip->pps_oplus_adapter, pps_or_ufcs_ing, pps_or_ufcs_power,
-			  cpa_power, chip->ufcs_adapter_id, chip->pps_adapter_id, cpa_power_by_user);
+			  cpa_power, chip->ufcs_adapter_id, cpa_power_by_user);
 	}
 	return sprintf(buf, "%u\n", cpa_power);
 }
@@ -4186,7 +4185,7 @@ static void oplus_configfs_wired_subs_callback(struct mms_subscribe *subs,
 			chip->wired_online = data.intval;
 			if (!chip->wired_online) {
 				schedule_work(&chip->eis_reset_work);
-				if (chip->plc_user_enable) {
+				if (chip->plc_topic && chip->plc_user_enable) {
 					cancel_delayed_work(&chip->clean_plc_enable_work);
 					schedule_delayed_work(&chip->clean_plc_enable_work,
 						msecs_to_jiffies(CLEAN_PLC_ENABLE_DELAY_MS));
@@ -4372,6 +4371,7 @@ static void oplus_configfs_comm_subs_callback(struct mms_subscribe *subs,
 {
 	struct oplus_configfs_device *chip = subs->priv_data;
 	union mms_msg_data data = { 0 };
+	bool not_pop_up;
 
 	switch (type) {
 	case MSG_TYPE_ITEM:
@@ -4384,6 +4384,14 @@ static void oplus_configfs_comm_subs_callback(struct mms_subscribe *subs,
 			oplus_mms_get_item_data(chip->comm_topic, id, &data,
 						false);
 			chip->notify_code = data.intval;
+			if (chip->notify_code | BIT(NOTIFY_BAT_NOT_CONNECT) ||
+			    chip->notify_code | BIT(NOTIFY_BAT_FULL_THIRD_BATTERY)) {
+				not_pop_up = oplus_comm_get_hmac_not_pop_up(chip->comm_topic);
+				chg_err("not_pop_up = %d\n", not_pop_up);
+				if (not_pop_up)
+					chip->notify_code &= ~(BIT(NOTIFY_BAT_NOT_CONNECT) |
+						BIT(NOTIFY_BAT_FULL_THIRD_BATTERY));
+			}
 			break;
 		case COMM_ITEM_SLOW_CHG:
 			oplus_mms_get_item_data(chip->comm_topic, id, &data, false);
@@ -4419,6 +4427,7 @@ static void oplus_configfs_subscribe_comm_topic(struct oplus_mms *topic,
 	struct oplus_configfs_device *chip = prv_data;
 	union mms_msg_data data = { 0 };
 	int rc;
+	bool not_pop_up;
 
 	chip->comm_topic = topic;
 	chip->comm_subs = oplus_mms_subscribe(chip->comm_topic, chip,
@@ -4433,6 +4442,14 @@ static void oplus_configfs_subscribe_comm_topic(struct oplus_mms *topic,
 	oplus_mms_get_item_data(chip->comm_topic, COMM_ITEM_NOTIFY_CODE, &data,
 				true);
 	chip->notify_code = data.intval;
+	if (chip->notify_code | BIT(NOTIFY_BAT_NOT_CONNECT) ||
+	    chip->notify_code | BIT(NOTIFY_BAT_FULL_THIRD_BATTERY)) {
+		not_pop_up = oplus_comm_get_hmac_not_pop_up(chip->comm_topic);
+		chg_err("not_pop_up = %d\n", not_pop_up);
+		if (not_pop_up)
+			chip->notify_code &= ~(BIT(NOTIFY_BAT_NOT_CONNECT) |
+				BIT(NOTIFY_BAT_FULL_THIRD_BATTERY));
+	}
 	oplus_mms_get_item_data(chip->comm_topic, COMM_ITEM_VBAT_UV_THR, &data,
 				true);
 	chip->vbat_uv_thr = data.intval;
@@ -4561,12 +4578,6 @@ static void oplus_configfs_pps_subs_callback(struct mms_subscribe *subs,
 				break;
 			chip->pps_charging = !!data.intval;
 			break;
-		case PPS_ITEM_ADAPTER_ID:
-			rc = oplus_mms_get_item_data(chip->pps_topic, id, &data, false);
-			if (rc < 0)
-				break;
-			chip->pps_adapter_id = (u32)data.intval;
-			break;
 		case PPS_ITEM_OPLUS_ADAPTER:
 			rc = oplus_mms_get_item_data(chip->pps_topic, id, &data, false);
 			if (rc < 0)
@@ -4609,9 +4620,6 @@ static void oplus_configfs_subscribe_pps_topic(struct oplus_mms *topic,
 	rc = oplus_mms_get_item_data(chip->pps_topic, PPS_ITEM_CHARGING, &data, true);
 	if (rc >= 0)
 		chip->pps_charging = !!data.intval;
-	rc = oplus_mms_get_item_data(chip->pps_topic, PPS_ITEM_ADAPTER_ID, &data, true);
-	if (rc >= 0)
-		chip->pps_adapter_id = (u32)data.intval;
 	rc = oplus_mms_get_item_data(chip->pps_topic, PPS_ITEM_OPLUS_ADAPTER, &data, true);
 	if (rc >= 0)
 		chip->pps_oplus_adapter = !!data.intval;
@@ -4629,7 +4637,7 @@ static void oplus_configfs_retention_subs_callback(struct mms_subscribe *subs,
 		case RETENTION_ITEM_CONNECT_STATUS:
 			oplus_mms_get_item_data(chip->retention_topic, id, &data, false);
 			chip->retention_state = data.intval;
-			if (chip->plc_user_enable && chip->retention_state) {
+			if (chip->plc_topic && chip->plc_user_enable && chip->retention_state) {
 				cancel_delayed_work(&chip->plc_enable_work);
 				schedule_delayed_work(&chip->plc_enable_work, msecs_to_jiffies(PLC_ENABLE_DELAY_MS));
 			}

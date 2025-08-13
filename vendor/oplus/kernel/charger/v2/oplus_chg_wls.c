@@ -3974,6 +3974,13 @@ static void oplus_chg_wls_reset_variables(struct oplus_chg_wls *wls_dev) {
 	wls_dev->monitor_count = 0;
 	wls_status->force_disconnect = false;
 
+	wls_status->wls_bcc_max_curr = 0;
+	wls_status->wls_bcc_min_curr = 0;
+	wls_status->wls_bcc_stop_curr = 0;
+	wls_status->bcc_curve_idx = 0;
+	wls_status->bcc_true_idx = 0;
+	wls_status->bcc_temp_range = 0;
+
 	wls_status->epp_chg_level = -1;
 	dynamic_cfg->epp_steps.fcc_wait_timeout = jiffies;
 	dynamic_cfg->norchg_steps.norchg_vol_level = 0;
@@ -4019,6 +4026,7 @@ static void oplus_chg_wls_reset_variables(struct oplus_chg_wls *wls_dev) {
 	vote(wls_dev->nor_icl_votable, EPP_CURVE_VOTER, false, 0, false);
 	vote(wls_dev->nor_icl_votable, CHG_LIMIT_CHG_VOTER, false, 0, false);
 	vote(wls_dev->nor_icl_votable, CHG_FULL_VOTER, false, 0, false);
+	vote(wls_dev->nor_icl_votable, FFC_VOTER, false, 0, false);
 	vote(wls_dev->nor_fcc_votable, USER_VOTER, false, 0, false);
 	vote(wls_dev->nor_fcc_votable, MAX_VOTER, false, 0, false);
 	vote(wls_dev->nor_fcc_votable, FFC_VOTER, false, 0, false);
@@ -4062,6 +4070,7 @@ static void oplus_chg_wls_reset_variables(struct oplus_chg_wls *wls_dev) {
 	vote(wls_dev->nor_out_disable_votable, STOP_VOTER, false, 0, false);
 	vote(wls_dev->nor_out_disable_votable, UOVP_VOTER, false, 0, false);
 	vote(wls_dev->nor_out_disable_votable, CHG_LIMIT_CHG_VOTER, false, 0, false);
+	vote(wls_dev->nor_out_disable_votable, CHG_FULL_VOTER, false, 0, false);
 	vote(wls_dev->nor_input_disable_votable, UOVP_VOTER, false, 0, false);
 	vote(wls_dev->nor_input_disable_votable, USER_VOTER, false, 0, false);
 	vote(wls_dev->rx_comu_votable, CHG_LIMIT_CHG_VOTER, false, 0, false);

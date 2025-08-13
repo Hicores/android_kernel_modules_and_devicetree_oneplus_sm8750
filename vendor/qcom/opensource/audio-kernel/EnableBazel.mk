@@ -84,6 +84,8 @@ LOCAL_MODULE_KO_DIRS += oplus/codecs/sipa/oplus_audio_sipa_tuning.ko
 #endif /* OPLUS_ARCH_EXTENDS */
 # add for oplus audio daemon kernel
 LOCAL_MODULE_KO_DIRS += oplus/oplus_audio_daemon/oplus_audio_daemon.ko
+# add for oplus audio netlink kernel
+LOCAL_MODULE_KO_DIRS += oplus/oplus_audio_netlink/oplus_audio_netlink.ko
 endif
 
 ifeq ($(call is-board-platform-in-list,blair),true)

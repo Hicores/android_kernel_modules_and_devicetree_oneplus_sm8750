@@ -1288,15 +1288,15 @@ static void syna_tcm_dispatch_report(struct syna_tcm_hcd *tcm_hcd)
 				touch_data->palm_status = PALM_TO_DEFAULT;
 			}
 			if (touch_data->glove_status == GLOVE_TO_TRIGGER && touch_data->glove_flag == 0) {
-				TPD_INFO("glove_mode = 1\n");
+				TPD_INFO("enter glove_mode = 1\n");
 				touch_data->glove_flag = 1;
-				tp_healthinfo_report(&tcm_hcd->monitor_data, HEALTH_GLOVE, &touch_data->glove_flag);
+				tp_healthinfo_report(tcm_hcd->monitor_data, HEALTH_GLOVE, &touch_data->glove_flag);
 			}
 
 			if (touch_data->glove_status == GLOVE_TO_HAND && touch_data->glove_flag == 1) {
-				TPD_INFO("glove_mode = 0\n");
+				TPD_INFO("quit glove_mode = 0\n");
 				touch_data->glove_flag = 0;
-				tp_healthinfo_report(&tcm_hcd->monitor_data, HEALTH_GLOVE, &touch_data->glove_flag);
+				tp_healthinfo_report(tcm_hcd->monitor_data, HEALTH_GLOVE, &touch_data->glove_flag);
 			}
 		}
 	} else if (tcm_hcd->report.id == REPORT_IDENTIFY) {
@@ -4832,14 +4832,20 @@ static void syna_getglove_mode_status(void *chip_data, int *enable, int *count)
 	struct syna_tcm_hcd *tcm_hcd = (struct syna_tcm_hcd *)chip_data;
 	struct touch_hcd *touch_hcd = tcm_hcd->touch_hcd;
 	struct touch_data *touch_data = &touch_hcd->touch_data;
+	int retval = 0;
+	unsigned short config;
 
-	TP_INFO(touch_data->glove_status, "%s: glove_status flag.\n", __func__);
-	TPD_INFO("glove_mode = %d \n", touch_data->glove_status);
-
-	/*mutex_lock(&tcm_hcd->rw_ctrl_mutex);*/
-	/*mutex_unlock(&tcm_hcd->rw_ctrl_mutex);*/
-
-	*enable = 1;
+	retval = syna_tcm_get_dynamic_config(tcm_hcd, DC_GLOVE_MODE_STATE, &config);
+	if (retval < 0) {
+		TPD_INFO("Failed to get dynamic DC_GLOVE_MODE_STATE  config\n");
+		return;
+	}
+	/*0x0F indicates the initial state;
+	0x00 indicates that stage 1 has been entered, and there is no glove on the detection state surface
+	0x01 indicates that stage 1 has been entered, and objects have been detected on the surface, but the conditions for stage 2 have not yet been met
+	0x02 indicates that the glove mode is entered, and it will not exit after raising your hand.*/
+	*enable = (config == 0x02 ? 1 : 0);
+	TPD_INFO("%s: config id is %d, enable: %d ,glove_status%d\n", __func__, config, *enable, touch_data->glove_status);
 	return;
 }
 

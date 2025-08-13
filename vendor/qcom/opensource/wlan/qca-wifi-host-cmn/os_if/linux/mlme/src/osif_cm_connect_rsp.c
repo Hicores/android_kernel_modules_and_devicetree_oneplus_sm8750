@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2015, 2020-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -530,17 +530,17 @@ static
 void osif_populate_connect_response_for_link(struct wlan_objmgr_vdev *vdev,
 					     struct cfg80211_connect_resp_params *conn_rsp_params,
 					     uint8_t link_id,
-					     uint8_t *link_addr,
+					     uint8_t *link_addr, uint8_t *bssid,
 					     enum wlan_status_code link_status_code,
 					     struct cfg80211_bss *bss)
 {
-	if (bss) {
-		conn_rsp_params->valid_links |=  BIT(link_id);
-		conn_rsp_params->links[link_id].bssid = bss->bssid;
+	conn_rsp_params->valid_links |=  BIT(link_id);
+	conn_rsp_params->links[link_id].bssid = bssid;
+	conn_rsp_params->links[link_id].addr = link_addr;
+	if (bss)
 		conn_rsp_params->links[link_id].bss = bss;
-		conn_rsp_params->links[link_id].addr = link_addr;
-		osif_populate_link_status_code(conn_rsp_params, link_id, link_status_code);
-	}
+
+	osif_populate_link_status_code(conn_rsp_params, link_id, link_status_code);
 
 	mlo_mgr_osif_update_connect_info(vdev, link_id);
 }
@@ -601,6 +601,7 @@ osif_populate_partner_links_mlo_params(struct wlan_objmgr_vdev *vdev,
 		osif_populate_connect_response_for_link(vdev, conn_rsp_params,
 							link_id,
 							link_vdev->vdev_mlme.macaddr,
+							rsp_partner_info->link_addr.bytes,
 							rsp_partner_info->link_status_code,
 							bss);
 release_ref:
@@ -631,6 +632,7 @@ static void osif_fill_connect_resp_mlo_params(struct wlan_objmgr_vdev *vdev,
 	osif_populate_connect_response_for_link(vdev, conn_rsp_params,
 						assoc_link_id,
 						vdev->vdev_mlme.macaddr,
+						rsp->bssid.bytes,
 						rsp->status_code,
 						bss);
 	osif_populate_partner_links_mlo_params(vdev, rsp, conn_rsp_params);
@@ -663,6 +665,7 @@ osif_populate_partner_links_mlo_params(struct wlan_objmgr_vdev *vdev,
 		osif_populate_connect_response_for_link(vdev, conn_rsp_params,
 							link_id,
 							link_info->link_addr.bytes,
+							link_info->ap_link_addr.bytes,
 							link_info->link_status_code,
 							bss);
 	}
@@ -699,6 +702,7 @@ static void osif_fill_connect_resp_mlo_params(struct wlan_objmgr_vdev *vdev,
 	osif_populate_connect_response_for_link(vdev, conn_rsp_params,
 						assoc_link_id,
 						link_info->link_addr.bytes,
+						rsp->bssid.bytes,
 						rsp->status_code,
 						bss);
 	osif_populate_partner_links_mlo_params(vdev, rsp, conn_rsp_params);
@@ -819,7 +823,7 @@ void osif_populate_connect_response_for_link(
 			struct wlan_objmgr_vdev *vdev,
 			struct cfg80211_connect_resp_params *conn_rsp_params,
 			uint8_t link_id,
-			uint8_t *link_addr,
+			uint8_t *link_addr, uint8_t *bssid,
 			enum wlan_status_code link_status_code,
 			struct cfg80211_bss *bss)
 {
@@ -907,6 +911,7 @@ osif_populate_partner_links_mlo_params(
 		osif_populate_connect_response_for_link(
 				vdev, conn_rsp_params, link_id,
 				link_vdev->vdev_mlme.macaddr,
+				rsp_partner_info->link_addr.bytes,
 				rsp_partner_info->link_status_code,
 				bss);
 
@@ -956,6 +961,7 @@ static void osif_fill_connect_resp_mlo_params(
 	osif_populate_connect_response_for_link(vdev, conn_rsp_params,
 						assoc_link_id,
 						vdev->vdev_mlme.macaddr,
+						rsp->bssid.bytes,
 						rsp->status_code,
 						bss);
 	osif_populate_partner_links_mlo_params(vdev, rsp, conn_rsp_params);

@@ -3649,10 +3649,12 @@ void oplus_sc6607_set_mivr(int vbatt)
 		else
 			g_chip->hw_aicl_point = SC6607_DUAL_AICL_POINT_VOL_9V;
 	} else {
-		if (g_chip->hw_aicl_point > SC6607_HW_AICL_POINT_VOL_5V_PHASE2)
-			g_chip->hw_aicl_point = SC6607_HW_AICL_POINT_VOL_5V_PHASE2;
+		if (g_chip->hw_aicl_point > SC6607_HW_AICL_POINT_VOL_5V_PHASE3)
+			g_chip->hw_aicl_point = SC6607_HW_AICL_POINT_VOL_5V_PHASE3;
 
-		if (g_chip->hw_aicl_point == SC6607_HW_AICL_POINT_VOL_5V_PHASE1 && vbatt > SC6607_AICL_POINT_VOL_5V_HIGH) {
+		if (g_chip->hw_aicl_point == SC6607_HW_AICL_POINT_VOL_5V_PHASE2 && vbatt > SC6607_AICL_POINT_VOL_5V_HIGH1) {
+			g_chip->hw_aicl_point = SC6607_HW_AICL_POINT_VOL_5V_PHASE3;
+		} else if (g_chip->hw_aicl_point == SC6607_HW_AICL_POINT_VOL_5V_PHASE1 && vbatt > SC6607_AICL_POINT_VOL_5V_HIGH) {
 			g_chip->hw_aicl_point = SC6607_HW_AICL_POINT_VOL_5V_PHASE2;
 		} else if (g_chip->hw_aicl_point == SC6607_HW_AICL_POINT_VOL_5V_PHASE2 &&
 		   vbatt < SC6607_AICL_POINT_VOL_5V_MID) {
@@ -6051,16 +6053,7 @@ static struct thermal_zone_device_ops charger_temp_tsbat_ops = {
 static int register_charger_thermal(struct sc6607 *info)
 {
 	int ret = 0;
-
-	struct tsbus_charger_temp *hst;
 	struct thermal_zone_device *tz_dev;
-
-	hst = kzalloc(sizeof(struct thermal_zone_device), GFP_KERNEL);
-
-	if (!hst) {
-		pr_err("alloc thermal_zone_device failed\n");
-		return -ENOMEM;
-	}
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
 	tz_dev = thermal_tripless_zone_device_register("charger_temp",
@@ -6541,7 +6534,7 @@ static int sc6607_voocphy_svooc_ovp_hw_setting(struct oplus_voocphy_manager *chi
 		return 0;
 
 	ret = sc6607_field_write(g_chip, F_VAC_OVP, 0x00);
-	ret = sc6607_field_write(g_chip, F_VBUS_OVP, 0x01);
+	ret = sc6607_field_write(g_chip, F_VBUS_OVP, SC6607_HK_VBUS_OVP_DATA);
 
 	return 0;
 }
@@ -6559,12 +6552,12 @@ static int sc6607_voocphy_svooc_hw_setting(struct oplus_voocphy_manager *chip)
 		ret = sc6607_field_write(g_chip, F_VAC_OVP, 0x02); /*VAC_OVP:12v VBUS_OVP:10v*/
 	else
 		ret = sc6607_field_write(g_chip, F_VAC_OVP, 0x00); /*VAC_OVP:12v VBUS_OVP:10v*/
-	ret = sc6607_field_write(g_chip, F_VBUS_OVP, 0x01);
+	ret = sc6607_field_write(g_chip, F_VBUS_OVP, SC6607_HK_VBUS_OVP_DATA);
 	reg_data = chip->ocp_reg & 0xff;
 	ret = sc6607_field_write(g_chip, F_IBUS_OCP, reg_data); /*IBUS_OCP_UCP:4.25A*/
 	ret = sc6607_set_watchdog_timer(g_chip, 1000);
 	ret = sc6607_field_write(g_chip, F_MODE, 0x0);
-	ret = sc6607_field_write(g_chip, F_PMID2OUT_OVP, 0x05);
+	ret = sc6607_field_write(g_chip, F_PMID2OUT_OVP, 0x07); /*PMID2OUT_OVP:600mV*/
 	ret = sc6607_field_write(g_chip, F_CHG_EN, true);
 	ret = sc6607_field_write(g_chip, F_PERFORMANCE_EN, true);
 	sc6607_voocphy_read_byte(chip->client, SC6607_REG_CP_CTRL, &data);
@@ -7547,8 +7540,9 @@ static int sc6607_charger_remove(struct i2c_client *client)
 static void sc6607_charger_shutdown(struct i2c_client *client)
 {
 	struct oplus_chg_chip *chg_chip = oplus_chg_get_chg_struct();
+	struct sc6607 *chip = g_chip;
 
-	if (!g_chip || !chg_chip)
+	if (!g_chip || !chg_chip || !chip)
 		return;
 
 	if (g_chip) {
@@ -7559,6 +7553,8 @@ static void sc6607_charger_shutdown(struct i2c_client *client)
 		sc6607_field_write(g_chip, F_ADC_EN, 0);
 		sc6607_field_write(g_chip, F_ACDRV_MANUAL_PRE, 3);
 	}
+
+	sc6607_set_input_current_limit(chip, SC6607_DEFAULT_IBUS_MA);
 	if (chg_chip->support_shipmode_in_chgic && chg_chip->enable_shipmode)
 		sc6607_enable_shipmode(chg_chip->enable_shipmode);
 

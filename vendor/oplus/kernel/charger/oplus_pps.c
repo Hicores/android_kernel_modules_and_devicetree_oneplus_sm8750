@@ -4931,6 +4931,7 @@ void oplus_pps_shutdown(void)
 	}
 
 	schedule_delayed_work(&chip->pps_stop_work, 0);
+	flush_delayed_work(&chip->pps_stop_work);
 }
 
 int oplus_pps_start(int authen)

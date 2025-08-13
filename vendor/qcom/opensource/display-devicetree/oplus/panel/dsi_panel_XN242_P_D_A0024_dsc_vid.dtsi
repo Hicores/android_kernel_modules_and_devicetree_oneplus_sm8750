@@ -1,4 +1,5 @@
 &mdss_mdp {
+	qcom,sde-max-bw-high-kbps = <24200000>;
 	dsi_panel_XN242_P_D_A0024_vid: qcom,mdss_dsi_panel_XN242_P_D_A0024_vid {
 		qcom,mdss-dsi-panel-name = "XN242 p d dsc video mode panel";
 		qcom,mdss-dsi-panel-type = "dsi_video_mode";
@@ -29,7 +30,8 @@
 		qcom,mdss-dsi-panel-peak-brightness = <5400000>;
 		qcom,mdss-dsi-panel-average-brightness = <2000000>;
 		qcom,mdss-dsi-panel-blackness-level = <2047>;
-
+		/* disable cesta */
+		qcom,mdss-disable-cesta-hw-sleep;
 		qcom,mdss-dsi-display-timings {
 			timing@0 {
 				qcom,mdss-dsi-panel-width = <1696>;

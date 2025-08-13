@@ -59,10 +59,12 @@ struct oplus_gki_device {
 	struct votable *vooc_curr_votable;
 	struct votable *ufcs_curr_votable;
 	struct votable *pps_curr_votable;
+	struct votable *wired_suspend_votable;
 
 	struct delayed_work status_keep_clean_work;
 	struct delayed_work status_keep_delay_unlock_work;
 	struct delayed_work retention_checkout_work;
+	struct delayed_work usb_phy_suspend_recovery_work;
 	struct wakeup_source *status_wake_lock;
 	bool status_wake_lock_on;
 	bool is_ui_keep;
@@ -81,6 +83,7 @@ struct oplus_gki_device {
 	int batt_rm;
 	int pre_batt_status;
 	int batt_status;
+	int batt_status_keep;
 	int batt_health;
 	int batt_chg_type;
 	int ui_soc;
@@ -104,7 +107,8 @@ struct oplus_gki_device {
 
 	bool smart_charging_screenoff;
 	bool retention_state;
-	bool retention_state_ready;
+	bool wired_present;
+	bool retention_wired_plugout;
 	bool pre_retention_state;
 	bool retention_connect_state;
 	enum oplus_temp_region temp_region;
@@ -174,6 +178,14 @@ is_pps_curr_votable_available(struct oplus_gki_device *chip)
 	if (!chip->pps_curr_votable)
 		chip->pps_curr_votable = find_votable("PPS_CURR");
 	return !!chip->pps_curr_votable;
+}
+
+__maybe_unused static bool
+is_wired_suspend_votable_available(struct oplus_gki_device *chip)
+{
+	if (!chip->wired_suspend_votable)
+		chip->wired_suspend_votable = find_votable("WIRED_CHARGE_SUSPEND");
+	return !!chip->wired_suspend_votable;
 }
 
 static bool is_main_gauge_topic_available(struct oplus_gki_device *chip)
@@ -425,14 +437,52 @@ static int usb_psy_get_prop(struct power_supply *psy,
 	return 0;
 }
 
+#define CLEAN_SUSPEND_VOTE_DELAY_MS 2000
+static void oplus_usb_phy_suspend_recovery_work(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct oplus_gki_device *chip = container_of(dwork, struct oplus_gki_device,
+		usb_phy_suspend_recovery_work);
+
+	if (is_wired_suspend_votable_available(chip))
+		vote(chip->wired_suspend_votable, USB_PSY_VOTER, false, 0, false);
+}
+
+#define USB_PHY_SUSPEND_CURR 100
+static void usb_psy_set_icl(struct oplus_gki_device *chip, int curr_ua)
+{
+	if (!chip) {
+		chg_err("chip null\n");
+		return;
+	}
+
+	if (!is_wired_suspend_votable_available(chip)) {
+		chg_err("wired_suspend_votable not available\n");
+		return;
+	}
+
+	if((chip->wired_type == OPLUS_CHG_USB_TYPE_SDP ||
+		chip->wired_type == OPLUS_CHG_USB_TYPE_PD_SDP) &&
+		((curr_ua / 1000) < USB_PHY_SUSPEND_CURR)) {
+		cancel_delayed_work_sync(&chip->usb_phy_suspend_recovery_work);
+		vote(chip->wired_suspend_votable, USB_PSY_VOTER, true, 1, false);
+		schedule_delayed_work(&chip->usb_phy_suspend_recovery_work,
+			msecs_to_jiffies(CLEAN_SUSPEND_VOTE_DELAY_MS));
+	} else
+		vote(chip->wired_suspend_votable, USB_PSY_VOTER, false, 0, false);
+}
+
 static int usb_psy_set_prop(struct power_supply *psy,
 		enum power_supply_property prop,
 		const union power_supply_propval *pval)
 {
 	int rc = 0;
+	struct oplus_gki_device *chip = power_supply_get_drvdata(psy);
 
 	switch (prop) {
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
+		if (oplus_chg_get_common_charge_icl_support_flags())
+			usb_psy_set_icl(chip, pval->intval);
 		break;
 	default:
 		chg_err("set prop %d is not supported\n", prop);
@@ -533,6 +583,46 @@ int oplus_chg_get_curr_time_ms(unsigned long *time_ms)
 	return *time_ms;
 }
 
+static int oplus_gki_get_batt_status(struct oplus_gki_device *chip)
+{
+	int oplus_batt_status;
+
+	oplus_batt_status = chip->batt_status;
+	if (chip->wls_online)
+		return oplus_batt_status;
+	if (is_chg_disable_votable_available(chip) &&
+	    (get_client_vote(chip->chg_disable_votable, MMI_CHG_VOTER) > 0))
+		return oplus_batt_status; /* mmi disable charge */
+	if (chip->temp_region <= TEMP_REGION_COLD)
+		return oplus_batt_status; /* temp cold disable charge */
+	if (chip->batt_status != POWER_SUPPLY_STATUS_FULL &&
+		chip->temp_region >= TEMP_REGION_HOT)
+		return oplus_batt_status; /* temp hot disable charge */
+
+	if (chip->retention_topic && chip->batt_status == POWER_SUPPLY_STATUS_DISCHARGING) {
+		if (!chip->retention_wired_plugout && !chip->wired_present)
+			oplus_batt_status = chip->batt_status_keep;
+		if (chip->retention_connect_state)
+			oplus_batt_status = chip->batt_status_keep;
+		chg_debug("retention_wired_plugout=%d, retention_connect_state=%d\n",
+			chip->retention_wired_plugout, chip->retention_connect_state);
+	}
+
+	if (chip->batt_status == POWER_SUPPLY_STATUS_FULL &&
+	    chip->temp_region == TEMP_REGION_WARM &&
+	    oplus_gki_get_ui_soc(chip) != 100)
+		oplus_batt_status = POWER_SUPPLY_STATUS_CHARGING;
+	if (chip->batt_status == POWER_SUPPLY_STATUS_FULL &&
+	    chip->temp_region == TEMP_REGION_HOT &&
+	    oplus_gki_get_ui_soc(chip) != 100)
+		oplus_batt_status = POWER_SUPPLY_STATUS_NOT_CHARGING;
+
+	chg_debug("batt_status=%d, batt_status_keep=%d\n",
+		  oplus_batt_status, chip->batt_status_keep);
+
+	return oplus_batt_status;
+}
+
 #define KPOC_FORCE_VBUS_MV 5000
 #define FORCE_VBUS_5V_TIME 10000
 static int battery_psy_get_prop(struct power_supply *psy,
@@ -547,6 +637,7 @@ static int battery_psy_get_prop(struct power_supply *psy,
 	int bms_temp_compensation;
 	int batt_qmax_0 = 0;
 	int batt_qmax_1 = 0;
+
 	static int pre_batt_status = 0;
 	unsigned long cur_chg_time = 0;
 
@@ -560,22 +651,8 @@ static int battery_psy_get_prop(struct power_supply *psy,
 		if (data.intval) {
 			pval->intval = pre_batt_status;
 		} else {
-			pval->intval = chip->batt_status;
-			if (is_chg_disable_votable_available(chip) &&
-				!(get_client_vote(chip->chg_disable_votable, MMI_CHG_VOTER) > 0)) {
-				if (chip->retention_connect_state &&
-					chip->batt_status == POWER_SUPPLY_STATUS_DISCHARGING)
-					pval->intval = POWER_SUPPLY_STATUS_CHARGING;
-				if (pval->intval == POWER_SUPPLY_STATUS_FULL &&
-					chip->temp_region == TEMP_REGION_WARM &&
-					oplus_gki_get_ui_soc(chip) != 100)
-					pval->intval = POWER_SUPPLY_STATUS_CHARGING;
-			}
-			if (pval->intval == POWER_SUPPLY_STATUS_FULL &&
-				chip->temp_region == TEMP_REGION_HOT &&
-				oplus_gki_get_ui_soc(chip) != 100)
-				pval->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
-			if  (chip->wls_online) {
+			pval->intval = oplus_gki_get_batt_status(chip);
+			if (chip->wls_online) {
 				pre_batt_status = pval->intval;
 			} else if (pre_batt_status) {
 				wlspsy = power_supply_get_by_name("wireless");
@@ -596,7 +673,8 @@ static int battery_psy_get_prop(struct power_supply *psy,
 				chg_info("EIS_VOTER: batt_status is %d\n", chip->batt_status);
 			}
 		}
-		chg_debug("batt_status is %d, retention_state =%d\n", chip->batt_status, chip->retention_state);
+		chip->batt_status_keep = pval->intval;
+		chg_debug("batt_status is %d, pval->intval =%d\n", chip->batt_status, pval->intval);
 		break;
 	case POWER_SUPPLY_PROP_HEALTH:
 		pval->intval = chip->batt_health;
@@ -1089,10 +1167,14 @@ static void oplus_gki_wired_online_update_work(struct work_struct *work)
 		container_of(work, struct oplus_gki_device, wired_online_update_work);
 	union mms_msg_data data = { 0 };
 	bool wired_online;
+	bool changed = false;
 
 	chg_debug("enter\n");
 	oplus_mms_get_item_data(chip->wired_topic, WIRED_ITEM_ONLINE, &data, false);
 	wired_online = data.intval;
+	if (wired_online)
+		chip->retention_wired_plugout = false;
+
 	oplus_mms_get_item_data(chip->wired_topic, WIRED_ITEM_CHG_TYPE, &data, false);
 	chip->wired_type = data.intval;
 	if (!!chip->retention_topic) {
@@ -1112,8 +1194,14 @@ static void oplus_gki_wired_online_update_work(struct work_struct *work)
 			chg_debug("gki_update_work_retention_state=%d\n", chip->retention_state);
 		} else if (chip->cc_detect == CC_DETECT_NOTPLUG) {
 			chip->retention_state = 0;
+		} else if (chip->wired_type == OPLUS_CHG_USB_TYPE_PD_SDP || chip->wired_type ==
+			  OPLUS_CHG_USB_TYPE_SDP || chip->wired_type == OPLUS_CHG_USB_TYPE_CDP) {
+			chip->retention_state = 0;
 		}
 	}
+
+	if (chip->wired_online != wired_online)
+		changed = true;
 	chip->wired_online = wired_online;
 	chg_debug("wired_online=%d, chip->wired_type =%d, retention_state_real=%d, cc_detect =%d\n",
 		chip->wired_online, chip->wired_type, chip->retention_state, chip->cc_detect);
@@ -1130,6 +1218,9 @@ static void oplus_gki_wired_online_update_work(struct work_struct *work)
 			chip->last_wired_type = POWER_SUPPLY_TYPE_UNKNOWN;
 			usb_psy_desc.type = POWER_SUPPLY_TYPE_UNKNOWN;
 		}
+		if (oplus_chg_get_common_charge_icl_support_flags() &&
+			is_wired_suspend_votable_available(chip))
+			vote(chip->wired_suspend_votable, USB_PSY_VOTER, false, 0, false);
 	} else {
 		if (!chip->retention_state && chip->wired_type)
 			chip->last_wired_type = chip->wired_type;
@@ -1146,14 +1237,18 @@ static void oplus_gki_wired_online_update_work(struct work_struct *work)
 			usb_psy_desc.type = POWER_SUPPLY_TYPE_USB_DCP;
 	}
 	chg_info("psy_type=%d, usb_psy_desc_type=%d, wired_type=%d, pre_wired_type=%d,"
-		"retention_state =%d\n",
+		"retention_state=%d, wired_online=%d\n",
 		usb_psy_desc.type, chip->usb_psy_desc_type, chip->wired_type, chip->pre_wired_type,
-		chip->retention_state);
-	if (!IS_ERR_OR_NULL(chip->batt_psy) &&
-		(chip->usb_psy_desc_type != usb_psy_desc.type ||
-		chip->pre_wired_type != chip->wired_type)) {
+		chip->retention_state, chip->wired_online);
+	if (chip->usb_psy_desc_type != usb_psy_desc.type ||
+	    chip->pre_wired_type != chip->wired_type) {
+		changed = true;
 		chip->usb_psy_desc_type = usb_psy_desc.type;
 		chip->pre_wired_type = chip->wired_type;
+	}
+
+	if (!IS_ERR_OR_NULL(chip->batt_psy) && changed) {
+		chg_debug("charger info changed\n");
 		power_supply_changed(chip->batt_psy);
 	}
 }
@@ -1183,6 +1278,10 @@ static void oplus_gki_wired_subs_callback(struct mms_subscribe *subs,
 			chg_info("otg enable power supply changed.\n");
 			if (!IS_ERR_OR_NULL(chip->batt_psy))
 				power_supply_changed(chip->batt_psy);
+			break;
+		case WIRED_ITEM_PRESENT:
+			oplus_mms_get_item_data(chip->wired_topic, id, &data, false);
+			chip->wired_present = !!data.intval;
 			break;
 		case WIRED_ITEM_CC_DETECT:
 			oplus_mms_get_item_data(chip->wired_topic, id, &data, false);
@@ -1377,10 +1476,9 @@ static void oplus_gki_comm_subs_callback(struct mms_subscribe *subs,
 						false);
 			chip->batt_status = data.intval;
 
-			chg_info("batt_status = %d, pre_batt_status = %d, wired_online = %d, retention_state = %d\n",
-				  chip->batt_status, chip->pre_batt_status, chip->wired_online, chip->retention_state);
-			if (!IS_ERR_OR_NULL(chip->batt_psy) && chip->pre_batt_status != chip->batt_status &&
-				(!chip->retention_topic || (chip->retention_topic && chip->retention_state_ready))) {
+			chg_info("batt_status = %d, pre_batt_status = %d, wired_online = %d\n",
+				  chip->batt_status, chip->pre_batt_status, chip->wired_online);
+			if (!IS_ERR_OR_NULL(chip->batt_psy) && chip->pre_batt_status != chip->batt_status) {
 				chip->pre_batt_status = chip->batt_status;
 				power_supply_changed(chip->batt_psy);
 			}
@@ -1645,18 +1743,15 @@ static void oplus_gki_retention_subs_callback(struct mms_subscribe *subs,
 					false);
 			chip->retention_connect_state = !!data.intval;
 			chg_debug("gki_retention_state, rc=%d\n", chip->retention_connect_state);
-			if (!chip->retention_connect_state)
-				chip->retention_state_ready = false;
 			if (!chip->retention_connect_state && chip->retention_connect_state != chip->pre_retention_state)
 				schedule_delayed_work(&chip->retention_checkout_work, 0);
 			if (chip->retention_connect_state)
 				chip->pre_retention_state = chip->retention_connect_state;
-			break;
-		case RETENTION_ITEM_STATE_READY:
-			chip->retention_state_ready = true;
-			if (!IS_ERR_OR_NULL(chip->batt_psy) && chip->pre_batt_status != chip->batt_status) {
-				chip->pre_batt_status = chip->batt_status;
-				power_supply_changed(chip->batt_psy);
+			if (!chip->wired_present) {
+				chip->retention_wired_plugout = true;
+				if (!IS_ERR_OR_NULL(chip->batt_psy) &&
+				    oplus_gki_get_batt_status(chip) != chip->batt_status)
+					power_supply_changed(chip->batt_psy);
 			}
 			break;
 		default:
@@ -1800,6 +1895,8 @@ static __init int oplus_chg_gki_init(void)
 	INIT_WORK(&gki_dev->gauge_update_work, oplus_gki_gauge_update_work);
 	INIT_WORK(&gki_dev->wired_online_update_work, oplus_gki_wired_online_update_work);
 	INIT_DELAYED_WORK(&gki_dev->retention_checkout_work, oplus_gki_retention_checkout_work);
+	INIT_DELAYED_WORK(&gki_dev->usb_phy_suspend_recovery_work,
+		oplus_usb_phy_suspend_recovery_work);
 
 	oplus_mms_wait_topic("gauge", oplus_gki_subscribe_gauge_topic, gki_dev);
 	oplus_mms_wait_topic("wired", oplus_gki_subscribe_wired_topic, gki_dev);

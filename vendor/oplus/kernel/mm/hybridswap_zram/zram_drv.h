@@ -23,7 +23,6 @@
 #include "zcomp.h"
 #include "../thp_zsmalloc/zsmalloc.h"
 
-
 #define SECTORS_PER_PAGE_SHIFT	(PAGE_SHIFT - SECTOR_SHIFT)
 #define SECTORS_PER_PAGE	(1 << SECTORS_PER_PAGE_SHIFT)
 #define ZRAM_LOGICAL_BLOCK_SHIFT 12
@@ -145,6 +144,7 @@ struct zram {
 #ifdef CONFIG_HYBRIDSWAP_ZRAM_MEMORY_TRACKING
 	struct dentry *debugfs_dir;
 #endif
+
 #if (defined CONFIG_HYBRIDSWAP_ZRAM_WRITEBACK) || (defined CONFIG_HYBRIDSWAP_CORE)
 	struct block_device *bdev;
 	unsigned int old_block_size;

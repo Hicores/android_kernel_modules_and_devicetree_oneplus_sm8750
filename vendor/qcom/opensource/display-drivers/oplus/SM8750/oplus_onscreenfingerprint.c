@@ -2945,7 +2945,7 @@ int oplus_ofp_power_mode_handle(void *dsi_display, int power_mode)
 					&& (p_oplus_ofp_params->longrui_aod_mode & OPLUS_OFP_A_MIRROR_TO_THE_END_AOD_MODE)
 						&& (p_oplus_ofp_params->longrui_aod_mode & OPLUS_OFP_AOD_ON)
 							&& !((oplus_ofp_optical_new_solution_is_enabled() || oplus_ofp_video_mode_aod_fod_is_enabled())
-								&& p_oplus_ofp_params->dimlayer_hbm))) {
+								&& p_oplus_ofp_params->dimlayer_hbm) && !oplus_ofp_oled_capacitive_is_enabled())) {
 			rc = oplus_ofp_aod_off_handle(display);
 			if (rc) {
 				OFP_ERR("[%s] failed to handle aod off, rc=%d\n", display->name, rc);

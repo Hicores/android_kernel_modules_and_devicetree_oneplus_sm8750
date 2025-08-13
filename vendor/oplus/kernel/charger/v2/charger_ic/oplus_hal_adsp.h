@@ -409,6 +409,25 @@ enum WLS_BOOST_SOURCE {
 	WLS_BOOST_SOURCE_PMIC_WLS,
 };
 
+enum charging_status {
+	CHARGING_TYPE_UNKNOW,
+	CHARGING_TYPE_VOOC_SVOOC,
+	CHARGING_TYPE_OPLUS_UFCS,
+	CHARGING_TYPE_OPLUS_PPS,
+	CHARGING_TYPE_THIRD_UFCS,
+	CHARGING_TYPE_THIRD_PPS,
+	CHARGING_TYPE_FFC,
+	CHARGING_TYPE_MAX,
+};
+
+enum qbg_full_temp_region {
+	QBG_TEMP_COLD,
+	QBG_TEMP_COOL,
+	QBG_TEMP_NORMAL,
+	QBG_TEMP_WARM,
+	QBG_TEMP_MAX,
+};
+
 enum OEM_MISC_CTL_CMD {
 	OEM_MISC_CTL_CMD_LCM_EN = 0,
 	OEM_MISC_CTL_CMD_LCM_25K = 2,
@@ -635,6 +654,7 @@ struct battery_chg_dev {
 	struct delayed_work	oem_lcm_en_check_work;
 	struct delayed_work	ctrl_lcm_frequency;
 	struct delayed_work	sourcecap_done_work;
+	struct delayed_work	sourcecap_suspend_recovery_work;
 	u32			oem_misc_ctl_data;
 	bool			oem_usb_online;
 	bool			oem_lcm_check;
@@ -740,6 +760,9 @@ struct battery_chg_dev {
 	bool ufcs_run_check_support;
 	bool error_prop;
 #endif
+	int batt_full_para[CHARGING_TYPE_MAX][QBG_TEMP_MAX];
+	int batt_full_temp[QBG_TEMP_MAX];
+	bool batt_full_method_new;
 };
 
 /**********************************************************************

@@ -5302,8 +5302,8 @@ static ssize_t icnss_show_fw_ready(struct device_driver *driver, char *buf)
            (pcie_bus_fail ? "pcie_bus_fail" : "pcie_bus_success"),
            (pcie_enumerate_fail ? "pcie_enumerate_fail" : "pcie_enumerate_success"),
            (pcie_l1_fail ? "pcie_l1_fail" : "pcie_l1_success"),
-           "bdf_name", ((plat_env->bdf_name && strlen(plat_env->bdf_name)) ? plat_env->bdf_name : ""),
-           "region_name", ((plat_env->region_name && strlen(plat_env->region_name)) ? plat_env->region_name : "")
+           "bdf_name", ((plat_env && plat_env->bdf_name && strlen(plat_env->bdf_name)) ? plat_env->bdf_name : ""),
+           "region_name", ((plat_env && plat_env->region_name && strlen(plat_env->region_name)) ? plat_env->region_name : "")
            );
 }
 

@@ -324,7 +324,7 @@
 					39 00 00 00 00 00 03 F0 A5 A5
 				];
 
-				qcom,mdss-dsi-timming-pwm-switch-onepulse-command = [
+				qcom,mdss-dsi-timming-switch-pwm-mode1-command = [
 					/* Level 2/3 key Enable */
 					39 00 00 40 00 00 03 F0 5A 5A
 					39 00 00 40 00 00 03 FC 5A 5A
@@ -875,7 +875,7 @@
 					39 00 00 00 00 00 03 F0 A5 A5
 				];
 
-				qcom,mdss-dsi-timming-pwm-switch-onepulse-command = [
+				qcom,mdss-dsi-timming-switch-pwm-mode1-command = [
 					/* Level 2/3 key Enable */
 					39 00 00 40 00 00 03 F0 5A 5A
 					39 00 00 40 00 00 03 FC 5A 5A
@@ -1426,7 +1426,7 @@
 					39 00 00 40 00 00 03 FC A5 A5
 					39 00 00 00 00 00 03 F0 A5 A5
 				];
-				qcom,mdss-dsi-timming-pwm-switch-onepulse-command = [
+				qcom,mdss-dsi-timming-switch-pwm-mode1-command = [
 					/* Level 2/3 key Enable */
 					39 00 00 40 00 00 03 F0 5A 5A
 					39 00 00 40 00 00 03 FC 5A 5A
@@ -1782,8 +1782,12 @@
 		Bit6: sending extend cmd while panel power on accroding to current pwm mode
 		Bit7: sending extend cmd while timing switch accroding to current pwm pulse level
 		Bit8: sending extend cmd after sending dbv threshold cmd in another thread
+		...
+		Bit24:support pwm mode0
+		Bit25:support pwm mode1
+		Bit26:support pwm mode2
 	*/
-	oplus,pwm-switch-config = <0x67>;
+	oplus,pwm-switch-config = <0x03000067>;
 	/*	oplus,pwm-switch-mode0-states-info/oplus,pwm-switch-mode1-states-info:
 		Specific dbv threshold and pulse info of 2 pwm mode, for pulse, 0 symbols 1pulse,
 		1symbols 3pulse and 2 symbols 18pulse. The format should be 1 dbv threshold info with
@@ -1792,11 +1796,11 @@
 	*/
 	oplus,pwm-switch-mode0-states-info = <2 954 1>;
 	oplus,pwm-switch-mode1-states-info = <0>;
-	/*	oplus,pwm-cmd-switch-map:
+	/*	oplus,pwm-mode1-cmd-switch-map/oplus,pwm-mode2-cmd-switch-map;
 		Specific cmd replace relationship while in switch on(1pulse) mode. It is a string array that
 		compose with cmd names, every 2 names combine 1 map. For example, map "'a', 'b'" means replace
 		a to b while sending a in switch on mode.
 	*/
-	oplus,pwm-cmd-switch-map = "qcom,mdss-dsi-timing-switch-command", "qcom,mdss-dsi-timming-pwm-switch-onepulse-command";
+	oplus,pwm-mode1-cmd-switch-map = "qcom,mdss-dsi-timing-switch-command", "qcom,mdss-dsi-timming-switch-pwm-mode1-command";
 
 };

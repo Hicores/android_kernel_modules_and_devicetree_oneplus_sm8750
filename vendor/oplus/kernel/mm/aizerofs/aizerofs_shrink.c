@@ -2,6 +2,8 @@
 /*
  * Copyright (C) 2020-2024 Oplus. All rights reserved
  */
+#define pr_fmt(fmt) "aizerofs: " fmt
+
 #include "aizerofs_shrink.h"
 #include <linux/list.h>
 #include <linux/shrinker.h>
@@ -17,6 +19,7 @@
 #include <linux/rcupdate.h>
 #include <linux/fsnotify.h>
 #include <linux/namei.h>
+#include <linux/timer.h>
 #include "aizerofs_internal.h"
 
 /*
@@ -61,6 +64,32 @@ static struct aizerofs_dma_buf_cache *find_and_prep_destroy_dmabuf_cache_by_path
 static int enable_fsnotify = 1;
 module_param(enable_fsnotify, int, 0644);
 MODULE_PARM_DESC(enable_fsnotify, "enable fsnotify (1 or 0)");
+
+#define SCENE_IMAGE_SEGMENTATION_OR_INPAINTING 1
+#define AIZEROFS_SCENE_SHRINK_AVAILABLE_WATER_MARK ((SZ_2G) >> PAGE_SHIFT)
+#define DEFAULT_TIMEOUT_TIMES_MS (10 * 1000)
+
+struct timer_list aizerofs_scene_timer;
+
+static int aizerofs_scene = 0;
+static void aizerofs_scene_timeout_callback(struct timer_list *t)
+{
+	aizerofs_scene = 0;
+	pr_debug("%s aizerofs_scene:%d!\n", __func__, aizerofs_scene);
+}
+
+int aizerofs_set_scene(unsigned long arg)
+{
+	del_timer(&aizerofs_scene_timer);
+
+	aizerofs_scene = (int)arg;
+	pr_debug("%s aizerofs_scene:%d!\n", __func__, aizerofs_scene);
+
+	aizerofs_scene_timer.expires = jiffies + msecs_to_jiffies(DEFAULT_TIMEOUT_TIMES_MS);
+	add_timer(&aizerofs_scene_timer);
+
+	return 0;
+}
 
 /*
  * This list is used to hold the inode information
@@ -544,10 +573,9 @@ static struct aizerofs_dma_buf_cache *find_and_prep_destroy_dmabuf_cache_by_path
 			if (dbuf_cache->flags & DBUF_CACHE_DISABLE_SHRINK) {
 				pr_err_ratelimited("ERROR!!!%s destroy dbuf_cache %s before releasing\n",
 					__func__, dbuf_cache->bin_path);
+				dbuf_cache->flags |= DBUF_CACHE_DEFERRED_DESTROY;
 				spin_unlock(&dbuf_cache->lock);
-				dbuf_cache = ERR_PTR(-EBUSY);
-				rcu_read_unlock();
-				return dbuf_cache;
+				continue;
 			}
 
 			if (dbuf_cache->is_destroying) {
@@ -586,10 +614,9 @@ static struct aizerofs_dma_buf_cache *find_and_prep_destroy_dmabuf_cache_by_inod
 			if (dbuf_cache->flags & DBUF_CACHE_DISABLE_SHRINK) {
 				pr_err_ratelimited("ERROR!!!%s destroy dbuf_cache %s before releasing\n",
 					__func__, dbuf_cache->bin_path);
+				dbuf_cache->flags |= DBUF_CACHE_DEFERRED_DESTROY;
 				spin_unlock(&dbuf_cache->lock);
-				dbuf_cache = ERR_PTR(-EBUSY);
-				rcu_read_unlock();
-				return dbuf_cache;
+				continue;
 			}
 
 			if (dbuf_cache->is_destroying) {
@@ -648,6 +675,21 @@ struct aizerofs_io {
 	struct bio_vec bvec[BATCH_IO];
 };
 
+bool is_overlayfs(struct file *filp) {
+	struct super_block *sb;
+
+	if (!filp) {
+		return false;
+	}
+
+	sb = filp->f_inode->i_sb;
+	if (sb && sb->s_magic == OVERLAYFS_SUPER_MAGIC) {
+		return true;
+	}
+
+	return false;
+}
+
 static int aizerofs_do_batch_io(struct aizerofs_io *io, struct aizerofs_dma_buf_cache *dbuf_cache)
 {
 	for (unsigned long len = 0; len < io->len; len += BATCH_SIZE) {
@@ -673,7 +715,6 @@ retry:
 		}
 
 		init_sync_kiocb(&kiocb, io->filp);
-		kiocb.ki_flags |= IOCB_NOWAIT;
 		kiocb.ki_pos = io->pos + len;
 		iov_iter_bvec(&iter, ITER_DEST, bvec, nr, nr * PAGE_SIZE);
 
@@ -701,6 +742,7 @@ static void io_work(struct work_struct *work)
 	struct aizerofs_dma_buf_cache *dbuf_cache = container_of(work, struct aizerofs_dma_buf_cache,
 			io_worker);
 	int ret;
+	const struct cred *old_cred;
 
 	/* everything is still in memory */
 	if (dbuf_cache->remained_pages == dbuf_cache->total_pages) {
@@ -710,10 +752,18 @@ static void io_work(struct work_struct *work)
 		return;
 	}
 
+	if (!dbuf_cache->cred) {
+		pr_err("cred is NULL\n");
+		return;
+	}
+
+	old_cred = override_creds(dbuf_cache->cred);
+	pr_info("override_dbuf_cache_creds\n");
+
 	bin_file = filp_open_dup(dbuf_cache->bin_path, O_RDONLY | O_DIRECT, 0);
 	if (IS_ERR(bin_file)) {
 		pr_err("%s failed to open %s: %ld\n", __func__, dbuf_cache->bin_path, PTR_ERR(bin_file));
-		return;
+		goto out_cred;
 	}
 
 	offs = dbuf_cache->pos / PAGE_SIZE;
@@ -770,6 +820,8 @@ static void io_work(struct work_struct *work)
 		}
 	}
 	filp_close(bin_file, NULL);
+out_cred:
+	revert_creds(old_cred);
 }
 
 static inline int register_fsnotify_for_parent_dir(
@@ -973,14 +1025,17 @@ bool handle_dbuf_cache_release(struct dma_buf *dmabuf)
 
 		atomic64_inc(&aizerofs_perf_stat.kill_stat[AIZEROFS_RELEASE_HIT_KILL_WITH_AIO]);
 	} else {
-		if (dbuf_cache->flags & DBUF_CACHE_THREAD_IO_ERR) {
+		if (dbuf_cache->flags & DBUF_CACHE_THREAD_IO_ERR || dbuf_cache->flags & DBUF_CACHE_DEFERRED_DESTROY) {
 			int i;
 			struct system_heap_buffer *buffer = dmabuf->priv;
 			struct sg_table *table;
 			struct scatterlist *sg;
 
+			if (dbuf_cache->flags & DBUF_CACHE_DEFERRED_DESTROY)
+				dbuf_cache->is_destroying = DESTROY_STAGE1;
 
 			spin_unlock(&dbuf_cache->lock);
+
 			table = &buffer->sg_table;
 			for_each_sgtable_sg(table, sg, i) {
 				struct page *page = sg_page(sg);
@@ -990,7 +1045,7 @@ bool handle_dbuf_cache_release(struct dma_buf *dmabuf)
 
 			spin_lock(&dbuf_cache->lock);
 
-			pr_info("%s:%d(io-error)for %s remained_pages:%ld total_pages:%ld allocated_pages:%ld read_pages:%ld stop_io_worker:%d\n",
+			pr_info("%s:%d(destroy) for %s remained_pages:%ld total_pages:%ld allocated_pages:%ld read_pages:%ld stop_io_worker:%d\n",
 				__func__, __LINE__, dbuf_cache->bin_path, dbuf_cache->remained_pages, dbuf_cache->total_pages,
 				dbuf_cache->allocated_pages, dbuf_cache->read_pages, dbuf_cache->stop_io_worker);
 			dbuf_cache->dbuf = NULL;
@@ -1002,6 +1057,11 @@ bool handle_dbuf_cache_release(struct dma_buf *dmabuf)
 			/* for drop metadata */
 			dbuf_cache->flags &= ~DBUF_CACHE_DISABLE_SHRINK;
 			spin_unlock(&dbuf_cache->lock);
+			if (dbuf_cache->flags & DBUF_CACHE_DEFERRED_DESTROY) {
+				mutex_lock(&dbuf_cache_fsnotify_mutex);
+				dmabuf_cache_destroy(dbuf_cache);
+				mutex_unlock(&dbuf_cache_fsnotify_mutex);
+			}
 
 			return true;
 		}
@@ -1056,6 +1116,9 @@ struct aizerofs_dma_buf_cache *find_or_create_dbuf_cache(unsigned long *len)
 		}
 
 		aizerofs_handle_put_param_idx(param_idx);
+		if (dbuf_cache->cred)
+			put_cred(dbuf_cache->cred);
+		dbuf_cache->cred = prepare_kernel_cred(current);
 		schedule_work(&dbuf_cache->io_worker);
 	}
 
@@ -1191,6 +1254,8 @@ unlock:
 			sync_dbuf_cache->bin_path, (unsigned long)sync_dbuf_cache->mark);
 		async_free_mark(sync_dbuf_cache->mark);
 		vfree(sync_dbuf_cache->pages);
+		if (sync_dbuf_cache->cred)
+			put_cred(sync_dbuf_cache->cred);
 		kfree(sync_dbuf_cache);
 		/* we are destroying all */
 		if (!target_cache) {
@@ -1261,6 +1326,13 @@ static unsigned long dmabuf_cache_shrink_count(struct shrinker *shrinker,
 		struct shrink_control *sc)
 {
 	unsigned long ret;
+	unsigned long available;
+
+	/*Don't shrink when in aizerofs scene and available is engough.*/
+	available = si_mem_available();
+	if ((aizerofs_scene == SCENE_IMAGE_SEGMENTATION_OR_INPAINTING) &&
+		available > AIZEROFS_SCENE_SHRINK_AVAILABLE_WATER_MARK)
+		return 0;
 
 	ret = dmabuf_cache_shrink(sc->gfp_mask, 0, NULL);
 	return (ret == SHRINK_STOP) ? 0 : ret;
@@ -1352,6 +1424,8 @@ int dmabuf_cache_init(void)
 {
 	int ret;
 	struct proc_dir_entry *root_dir;
+
+	timer_setup(&aizerofs_scene_timer, aizerofs_scene_timeout_callback, 0);
 
 	ret = register_shrinker(&dmabuf_cache_shrinker, "dmabuf-cache-shrinker");
 	if (ret) {

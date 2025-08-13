@@ -166,3 +166,12 @@ config AUDIO_DAEMON_KERNEL_QCOM
 	  that can be used with other platforms
 	  Select m if you have such device.
 	  If unsure select "N".
+
+config AUDIO_NETLINK_KERNEL
+	tristate "audio netlink kernel communication"
+	default n
+	help
+	  This adds for QCOM or MTK boards
+	  that can be used with other platforms
+	  Select m if you have such device.
+	  If unsure select "N".

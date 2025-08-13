@@ -1014,21 +1014,15 @@ void kpdmcu_fw_update_thread(struct work_struct *work)
                     } while ((tp_ota_status == 1) &&
                             (pogo_keyboard_client->fw_update_progress <= FW_PROGRESS_50 * FW_PERCENTAGE_100) &&
                             (pogo_keyboard_client->fw_update_progress >= FW_PROGRESS_25 * FW_PERCENTAGE_100));
-                    if (pogo_keyboard_client->fw_update_progress < FW_PROGRESS_25 * FW_PERCENTAGE_100) {
-                        kb_debug("%s %d, maybe KB plugout and quick plugin\n", __func__, __LINE__);
-                        pogo_keyboard_client->kpd_fw_status = FW_UPDATE_FAIL;
-                        pogo_keyboard_client->fw_update_progress = 0;
-                        tp_ota_status = 2;
-                        goto out1;
-                    } else if (pogo_keyboard_client->fw_update_progress > FW_PROGRESS_50 * FW_PERCENTAGE_100) {
+                    if ((pogo_keyboard_client->fw_update_progress < FW_PROGRESS_25 * FW_PERCENTAGE_100) ||
+                        (pogo_keyboard_client->fw_update_progress > FW_PROGRESS_50 * FW_PERCENTAGE_100)) {
                         kb_debug("%s %d, maybe KB plugout or be changed\n", __func__, __LINE__);
                         pogo_keyboard_client->kpd_fw_status = FW_UPDATE_FAIL;
                         pogo_keyboard_client->fw_update_progress = 0;
-                        max_disconnect_count = 10;
-                        goto out1;
-                    } else if (tp_ota_status == 3) {
-                        kb_debug("%s %d, tp ota success!!!\n", __func__, __LINE__);
                         tp_ota_status = 0;
+                        goto out1;
+                    } else if (tp_ota_status == 0) {
+                        kb_debug("%s %d, tp ota success!!!\n", __func__, __LINE__);
                         max_disconnect_count = 10;
                     }
                 } else if (ret < 0) {
@@ -1047,12 +1041,12 @@ void kpdmcu_fw_update_thread(struct work_struct *work)
                 ret = kpd_fw_dfu_update(firmware_data, fw_data_count, bin_data->checksum,
                                 bin_data->start_addr, bin_data->file_len, bin_data->type);
                 if (ret == 0) {
-                    max_disconnect_count = 160; //8s
+                    max_disconnect_count = 400; //20s
                     dfu_boot = 1;
-                    //dfu boot need > 3s
+                    //dfu boot need > 6s
                     do {
-                        msleep(30);
-                        pogo_keyboard_client->fw_update_progress += 2;
+                        msleep(50);
+                        pogo_keyboard_client->fw_update_progress += 1;
                         kb_debug("%s %d, fw_update_progress:%d\n", __func__, __LINE__, pogo_keyboard_client->fw_update_progress);
                     } while ((pogo_keyboard_client->fw_update_progress <= FW_PROGRESS_99 * FW_PERCENTAGE_100) &&
                         (pogo_keyboard_client->fw_update_progress >= FW_PROGRESS_96 * FW_PERCENTAGE_100));

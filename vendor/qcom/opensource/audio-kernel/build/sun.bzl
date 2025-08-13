@@ -52,6 +52,10 @@ def define_sun():
 #add for oplus audio daemon kernel
             "oplus_audio_daemon",
 #endif /* CONFIG_AUDIO_DAEMON_KERNEL_QCOM */
+#ifdef CONFIG_AUDIO_NETLINK_KERNEL
+#add for oplus audio netlink kernel
+            "oplus_audio_netlink",
+#endif /* CONFIG_AUDIO_NETLINK_KERNEL */
             "lpass_bt_swr_dlkm",
 			"qmp_dlkm"
         ],

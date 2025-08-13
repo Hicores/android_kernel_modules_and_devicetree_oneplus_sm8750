@@ -150,6 +150,12 @@ static int fps_data_ctrl_handler(struct ctl_table *table, int write, void __user
 	char buf[MAX_FPS_DATA_SIZE];
 	struct frame_fps_data *p_ff_data;
 
+	#define APPEND_FMT(fmt, ...) do { \
+		int _remaining = MAX_FPS_DATA_SIZE - cnt; \
+		if (_remaining <= 0) break; \
+		cnt += snprintf(buf + cnt, _remaining, fmt, ##__VA_ARGS__); \
+	} while (0)
+
 	if (write) {
 		ret = write_frame_fps_data(buffer);
 		if (ret < 0) {
@@ -158,24 +164,22 @@ static int fps_data_ctrl_handler(struct ctl_table *table, int write, void __user
 	} else {
 		for (int i = 0; i < FRAME_FPS_DATA_SIZE; ++i) {
 			p_ff_data = &g_frame_fps_data[i];
-			cnt += snprintf(buf + cnt, 1024 - cnt, "frame_rate %d, ",
-					p_ff_data->frame_rate);
-			cnt += snprintf(buf + cnt, 1024 - cnt, "input_period: %d, ",
-					p_ff_data->input_period);
-			cnt += snprintf(buf + cnt, 1024 - cnt, "animation_period: %d, ",
-					p_ff_data->animation_period);
-			cnt += snprintf(buf + cnt, 1024 - cnt, "traversal_period: %d, ",
-					p_ff_data->traversal_period);
-			cnt += snprintf(buf + cnt, 1024 - cnt, "step_boost_util: %d, ",
-					p_ff_data->step_boost_util);
-			cnt += snprintf(buf + cnt, 1024 - cnt, "half_vsync_util: %d",
-					p_ff_data->half_vsync_util);
-			cnt += snprintf(buf + cnt, 1024 - cnt, "\n");
+
+			APPEND_FMT("frame_rate %d, ", p_ff_data->frame_rate);
+			APPEND_FMT("input_period: %d, ", p_ff_data->input_period);
+			APPEND_FMT("animation_period: %d, ", p_ff_data->animation_period);
+			APPEND_FMT("traversal_period: %d, ", p_ff_data->traversal_period);
+			APPEND_FMT("step_boost_util: %d, ", p_ff_data->step_boost_util);
+			APPEND_FMT("half_vsync_util: %d", p_ff_data->half_vsync_util);
+			APPEND_FMT("\n");
 		}
-		strncpy((char *)table->data, buf, 1024);
+
+		buf[MAX_FPS_DATA_SIZE - 1] = '\0';
+		strncpy((char *)table->data, buf, MAX_FPS_DATA_SIZE);
 		ret = proc_dostring(table, write, buffer, lenp, ppos);
 	}
 
+	#undef APPEND_FMT
 	return ret;
 }
 

@@ -50,7 +50,6 @@ char TAG[60] = { 0 };
 //but host only wait 200ms after keyboard attechment is finished.
 //note the host timer is 50ms.
 int dfu_boot = 0;
-int dfu_first_get_heart = 0;
 int tp_ota_status = 0;
 int max_disconnect_count = 10;
 static int max_plug_in_disconnect_count = 40;
@@ -371,18 +370,9 @@ static int pogo_keyboard_mod_data_process(char *buf, int len)
 
                 kb_info("%s %d plug in\n", __func__, __LINE__);
                 pogo_keyboard_client->plug_in_count = 0; // reset heartbeat counter.
-                if (pogo_keyboard_client->pogopin_ota_dfu) {
-                    if (dfu_first_get_heart == 0) {
-                        dfu_first_get_heart = 1;
-                        max_disconnect_count = 300;//15s
-                    } else if (tp_ota_status == 1 || tp_ota_status == 2) {
-                        //kb plugout when tp ota
-                        max_disconnect_count = 300;//15s
-                        tp_ota_status = 0;
-                    } else {
-                        max_disconnect_count = 10;
-                        max_plug_in_disconnect_count = 40;// reset heartbeat_hrtimer to 2s
-                    }
+                if (pogo_keyboard_client->pogopin_ota_dfu && tp_ota_status == 0) {
+                    max_disconnect_count = 10;
+                    max_plug_in_disconnect_count = 40;// reset heartbeat_hrtimer to 2s
                 }
                 pogo_keyboard_event_send(KEYBOARD_PLUG_IN_EVENT);
 
@@ -400,17 +390,9 @@ static int pogo_keyboard_mod_data_process(char *buf, int len)
                     }
                     pogo_keyboard_client->pogo_keyboard_status &= ~KEYBOARD_CONNECT_STATUS;
                     pogo_keyboard_client->plug_in_count = 0;
-                    if (pogo_keyboard_client->pogopin_ota_dfu) {
-                        if (tp_ota_status == 1) {
-                            //kb plugout when tp ota
-                            max_disconnect_count = 300;//15s
-                        } else if (tp_ota_status == 2) {
-                            max_disconnect_count = 300;//15s
-                            tp_ota_status = 0;
-                        } else {
-                            max_disconnect_count = 10;
-                            max_plug_in_disconnect_count = 40;// reset heartbeat_hrtimer to 2s
-                        }
+                    if (pogo_keyboard_client->pogopin_ota_dfu && tp_ota_status == 0) {
+                        max_disconnect_count = 10;
+                        max_plug_in_disconnect_count = 40;// reset heartbeat_hrtimer to 2s
                     }
                     kb_info("%s %d quick plug out and quick plug in\n", __func__, __LINE__);
                     pogo_keyboard_event_send(KEYBOARD_PLUG_IN_EVENT);
@@ -504,7 +486,7 @@ static int pogo_keyboard_mod_data_process(char *buf, int len)
                 value == ONE_WIRE_BUS_PACKET_USER_PASSTHROUGH_CMD && buf[2] == 0x0A) {
                 char ota_start_buf[] = { 0x38, 0x04, 0x0a, 0x02, 0x06, 0x01, 0x05, 0xd5 };
                 if (memcmp(buf, ota_start_buf, sizeof(ota_start_buf)) == 0) {
-                    kb_err("%s %d, dfu ota start...\n", __func__, __LINE__);
+                    kb_debug("%s %d, dfu ota start...\n", __func__, __LINE__);
                     max_disconnect_count = 40; //2s
                 }
             }
@@ -512,8 +494,26 @@ static int pogo_keyboard_mod_data_process(char *buf, int len)
                 value == ONE_WIRE_BUS_PACKET_USER_PASSTHROUGH_ACK_CMD && buf[2] == 0x0A) {
                 char ota_reset_buf[] = { 0x39, 0x05, 0x0a, 0x03, 0x60, 0x04, 0x01, 0x9b, 0x5a };
                 if (memcmp(buf, ota_reset_buf, sizeof(ota_reset_buf)) == 0) {
-                    kb_err("%s %d, dfu ota reset...\n", __func__, __LINE__);
-                    max_disconnect_count = 160;//8s
+                    kb_debug("%s %d, dfu ota reset...\n", __func__, __LINE__);
+                    max_disconnect_count = 400;//20s
+                }
+            }
+            if (pogo_keyboard_client->pogopin_ota_dfu &&
+                value == ONE_WIRE_BUS_PACKET_USER_GENERAL_ACK_CMD && buf[2] == 0x18) {
+                char tp_ota_start[] = { 0x3b, 0x03, 0x18, 0x01, 0x01 };
+                if (memcmp(buf, tp_ota_start, sizeof(tp_ota_start)) == 0) {
+                    kb_debug("%s %d, tp ota start...\n", __func__, __LINE__);
+                    tp_ota_status = 1;
+                    max_disconnect_count = 300;
+                }
+            }
+            if (pogo_keyboard_client->pogopin_ota_dfu &&
+                value == ONE_WIRE_BUS_PACKET_USER_GENERAL_ACK_CMD && buf[2] == 0x16) {
+                char tp_ota_ack[] = { 0x3b, 0x03, 0x16, 0x01, 0x01 };
+                if (memcmp(buf, tp_ota_ack, sizeof(tp_ota_ack)) == 0) {
+                    kb_debug("%s %d, tp ota end...\n", __func__, __LINE__);
+                    tp_ota_status = 0;
+                    max_disconnect_count = 10;
                 }
             }
             if (pogo_keyboard_client->pogopin_ota_dfu &&
@@ -934,7 +934,7 @@ static int pogo_keyboard_set_touch_status(bool state)
 static int pogo_keyboard_set_touch_gesture(bool state)
 {
     char write_buf[] = {ONE_WIRE_BUS_PACKET_USER_GENERAL_CMD, 0x03, 0x17, 0x01, 0x00};
-    char buf[] = {ONE_WIRE_BUS_PACKET_USER_GENERAL_ACK_CMD, 0x03, 0x18, 0x01, 0x01};
+    char buf[] = {ONE_WIRE_BUS_PACKET_USER_GENERAL_ACK_CMD, 0x03, 0x17, 0x01, 0x01};
     char temp[128] = {0};
     int read_len = 0;
     int count = 3;
@@ -2149,6 +2149,7 @@ static int pogo_keyboard_event_process(unsigned char pogo_keyboard_event)
                 }
             }
             if (pogo_keyboard_client->pogopin_ota_dfu) {
+                tp_ota_status = 0;
                 max_disconnect_count = 10;
                 max_plug_in_disconnect_count = 40;
             }
@@ -2572,7 +2573,7 @@ static enum hrtimer_restart keyboard_core_plug_hrtimer(struct hrtimer *timer)
             pogo_keyboard_event_send(KEYBOARD_POWER_ON_EVENT);
             disable_irq_nosync(pogo_keyboard_client->uart_wake_gpio_irq);
             if (pogo_keyboard_client->pogopin_ota_dfu) {
-                max_disconnect_count = 160;//8s
+                max_disconnect_count = 400;//20s
             }
         }
 
@@ -2925,9 +2926,36 @@ static ssize_t proc_keypad_state_read(struct file *file, char __user *user_buf,
     return ret;
 }
 
+static ssize_t proc_keypad_state_write(struct file *file, const char __user *buf, size_t count, loff_t *lo)
+{
+    char write_data[2] = { 0 };
+
+    if (count > 2) {
+        kb_err("%s %d count: %zd > 2\n", __func__, __LINE__, count);
+        return count;
+    }
+
+    if (copy_from_user(&write_data, buf, count)) {
+        kb_err("%s %d read proc input error.\n", __func__, __LINE__);
+        return count;
+    }
+
+    if(!pogo_keyboard_client)
+        return count;
+
+    if(write_data[0] == '1'){
+        pogo_keyboard_connect_send_uevent();
+        kb_debug("%s, %d send connect uevent.\n", __func__, __LINE__);
+    } else {
+        kb_debug("%s, %d input error.\n", __func__, __LINE__);
+    }
+
+    return count;
+}
+
 static const struct proc_ops proc_keypad_state_ops = {
     .proc_read = proc_keypad_state_read,
-    .proc_open = simple_open,
+    .proc_write = proc_keypad_state_write,
     .proc_lseek = default_llseek,
 };
 
@@ -3125,7 +3153,7 @@ static int pogo_keyboard_init_proc(void)
         }
     }
     /*for factory test detect*/
-    prEntry_tmp = proc_create("kbd_keypad_status", 0444, prEntry_keyboard, &proc_keypad_state_ops);
+    prEntry_tmp = proc_create("kbd_keypad_status", 0664, prEntry_keyboard, &proc_keypad_state_ops);
     if (prEntry_tmp == NULL) {
         kb_err("%s %d couldn't create proc entry\n", __func__, __LINE__);
         ret = -ENOMEM;

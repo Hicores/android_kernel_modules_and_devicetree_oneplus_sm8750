@@ -4568,7 +4568,8 @@ bool oplus_ufcs_show_vooc(void)
 	if (!chip || !chip->ufcs_support_type)
 		return false;
 
-	return (oplus_ufcs_get_protocol_status() == PROTOCOL_CHARGING_UFCS_OPLUS && oplus_is_ufcs_charging());
+	return ((oplus_ufcs_get_protocol_status() == PROTOCOL_CHARGING_UFCS_OPLUS ||
+	    oplus_ufcs_get_protocol_status() == PROTOCOL_CHARGING_UFCS_THIRD) && oplus_is_ufcs_charging());
 }
 
 static enum ufcs_power_type oplus_ufcs_imax_covert_power(enum ufcs_power_imax curr)

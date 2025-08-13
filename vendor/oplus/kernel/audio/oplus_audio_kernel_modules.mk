@@ -48,6 +48,8 @@ AUDIO_KERNEL_MODULES += $(KERNEL_MODULES_OUT)/oplus_audio_sipa.ko
 AUDIO_KERNEL_MODULES += $(KERNEL_MODULES_OUT)/oplus_audio_sipa_tuning.ko
 # add for audio daemon kernel on QCOM platform sun
 AUDIO_KERNEL_MODULES += $(KERNEL_MODULES_OUT)/oplus_audio_daemon.ko
+# add for audio netlink kernel communication
+AUDIO_KERNEL_MODULES += $(KERNEL_MODULES_OUT)/oplus_audio_netlink.ko
 endif
 
 ifeq ($(call is-board-platform-in-list,parrot), true)

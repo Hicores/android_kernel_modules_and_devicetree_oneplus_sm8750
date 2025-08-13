@@ -2672,13 +2672,16 @@ int oplusLpmUeventInit(void)
 	int ret = RET_OK;
 
 	INIT_WORK(&mWork, oplusWorkHandler);
-	mUeventInit = INIT_FINISHED;
 	wlan_object.name = "lpm";
 	wlan_object.minor = MISC_DYNAMIC_MINOR;
-	misc_register(&wlan_object);
+	if (misc_register(&wlan_object) != 0) {
+		misc_deregister(&wlan_object);
+		return RET_ERR;
+	}
 	if (wlan_object.this_device != NULL) {
 		ret = kobject_uevent(&wlan_object.this_device->kobj, KOBJ_ADD);
 		if (ret == RET_OK) {
+			mUeventInit = INIT_FINISHED;
 			mMiscDevInit = INIT_FINISHED;
 		}
 	}

@@ -5710,7 +5710,7 @@ static ssize_t tfa98xx_reg_read_test(struct file *file,
 				loff_t *ppos)
 {
 	struct i2c_client *i2c = file->private_data;
-	struct tfa98xx *tfa98xx = i2c_get_clientdata(i2c);
+	struct tfa98xx *tfa98xx = NULL;
 	unsigned int reg_val = 0;
 	int ret = 0;
 	int len = 0;
@@ -5720,11 +5720,17 @@ static ssize_t tfa98xx_reg_read_test(struct file *file,
 		return 0;
 	}
 
-	if (!i2c || !tfa98xx) {
-		pr_err("%s:i2c/tfa98xx is error\n", __func__);
+	if (!i2c) {
+		pr_err("%s:i2c is error\n", __func__);
 		return ret;
 	}
 	pr_info("enter:%s reg addr=0x%x\n", __func__, i2c->addr);
+
+	tfa98xx = i2c_get_clientdata(i2c);
+	if (!tfa98xx) {
+		pr_err("%s:tfa98xx is error\n", __func__);
+		return ret;
+	}
 
 	str = kzalloc(REG_READ_LEN, GFP_KERNEL);
 	if (!str) {

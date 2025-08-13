@@ -221,7 +221,11 @@
 #define DEVICE_ZY0602				3
 #define DEVICE_ZY0603				4
 
-#define DEVICE_TYPE_BQ27426			0x0426
+#define DEVICE_TYPE_BQ27426_0		0x0426
+#define DEVICE_TYPE_BQ27426_1		0x8426
+#define DEVICE_TYPE_BQ27426_2		0x4426
+#define DEVICE_TYPE_BQ27426_3		0x04A6
+#define DEVICE_TYPE_BQ27426_4		0x0466
 #define DEVICE_BQ27426				5
 
 #define DEVICE_TYPE_FOR_VOOC_BQ27541		0
@@ -377,7 +381,14 @@
 #define ZY0603_GFCONFIG_R2D_REG			0x475A
 #define ZY0603_GFMAXDELTA_REG			0x479B
 
-
+#define GAUGE_SUBCMD_TRY_COUNT	3
+#define GAUGE_EXTERN_DATAFLASHBLOCK	0x3e
+#define BQ27541_BLOCK_SIZE			32
+#define BQ28Z610_EXTEND_DATA_SIZE		34
+#define BQ28Z610_REG_TRUE_FCC			0x0073
+#define BQ28Z610_TRUE_FCC_NUM_SIZE		2
+#define BQ28Z610_TRUE_FCC_OFFSET		8
+#define BQ28Z610_FCC_SYNC_CMD			0x0043
 
 #define U_DELAY_1_MS	1000
 #define U_DELAY_5_MS	5000
@@ -700,6 +711,9 @@ struct chip_bq27541 {
 	bool modify_soc_smooth;
 	bool modify_soc_calibration;
 
+	bool fcc_too_small_checking;
+	struct work_struct fcc_too_small_check_work;
+
 	bool allow_reading;
 	bool wlchg_started;
 
@@ -763,6 +777,15 @@ struct chip_bq27541 {
 	bool gauge_cal_board;
 	bool gauge_check_model;
 	bool gauge_check_por;
+
+	int gauge_abnormal_vbatt_max;
+	int gauge_abnormal_vbatt_min;
+	int cp_abnormal_fcc_max;
+	int cp_abnormal_fcc_min;
+	int cp_abnormal_soh_max;
+	int cp_abnormal_soh_min;
+	int cp_abnormal_qmax_max;
+	int cp_abnormal_qmax_min;
 
 	struct bqfs_para_info bqfs_info;
 	struct mutex track_upload_lock;

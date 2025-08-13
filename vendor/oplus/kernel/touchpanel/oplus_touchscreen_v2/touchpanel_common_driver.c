@@ -2356,6 +2356,7 @@ static int init_parse_dts(struct device *dev, struct touchpanel_data *ts)
 	ts->disable_touch_event_support = of_property_read_bool(np, "disable_touch_event_support");
 	ts->lpwg_fw_support = of_property_read_bool(np, "lpwg_fw_support");
 	ts->tp_scene_para_switch_support = of_property_read_bool(np, "tp_scene_para_switch_support");
+	ts->fp_unlock_status_support = of_property_read_bool(np, "fp_unlock_status_support");
 
 #ifdef CONFIG_TOUCHPANEL_TRUSTED_TOUCH
 	ts->trusted_touch_support = of_property_read_bool(np, "trusted_touch_support");
@@ -4732,6 +4733,8 @@ EXIT:
 	if (ts->en_touch_event_helper) {
 		post_message(ts->msg_list, 0, TYPE_SUSPEND, NULL);
 	}
+
+	ts->is_hall_near_resume = false;
 
 	TP_INFO(ts->tp_index, "%s: end.\n", __func__);
 	mutex_unlock(&ts->mutex);

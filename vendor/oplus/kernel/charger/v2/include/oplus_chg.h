@@ -3,6 +3,7 @@
 
 #include <linux/version.h>
 #include "oplus_chg_symbol.h"
+#include <linux/rtc.h>
 
 extern int oplus_log_level;
 
@@ -218,6 +219,7 @@ enum {
 	NOTIFY_GAUGE_SOC_JUMP,
 	NOTIFY_ANTI_EXPANSION_WARNING,
 	NOTIFY_ANTI_EXPANSION_ERROR,
+	NOTIFY_FASTCHG_CHECK_FAIL,
 };
 
 enum oplus_chg_err_code {

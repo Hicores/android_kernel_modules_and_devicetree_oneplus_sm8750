@@ -83,7 +83,7 @@ enum {
 };
 
 #define AP_ALLOW_FASTCHG	(1 << 6)
-#define TARGET_VOL_OFFSET_THR	250
+#define TARGET_VOL_OFFSET_THR	1000 /* considering adapter error and adc error, changing from 0.25A to 1A */
 #define TARGET_CURR_OFFSET_THR  500
 #define DELAY_TEMP_MONITOR_COUNTS		2
 #define trace_oplus_tp_sched_change_ux(x, y)
@@ -2064,13 +2064,20 @@ static int oplus_voocphy_handle_ask_fastchg_ornot_cmd(struct oplus_voocphy_manag
 						&chip->voocphy_tx_buff[1], NO_VOOC2_CIRCUIT_PARALLEL_R_H_DEF);
 			}
 		} else {
-			status = oplus_voocphy_write_mesg_mask(TX0_DET_BIT3_TO_BIT7_MASK,
-							       &chip->voocphy_tx_buff[0],
-							       NO_VOOC2_CIRCUIT_R_L_DEF |
-							       (chip->fastchg_allow && chip->oplus_ap_fastchg_allow));
-			status = oplus_voocphy_write_mesg_mask(TX1_DET_BIT0_TO_BIT1_MASK,
-							       &chip->voocphy_tx_buff[1],
-							       NO_VOOC2_CIRCUIT_R_H_DEF);
+			if (chip->chg_ctrl_by_sale_mode == SALE_MODE_COOL_DOWN_THREE &&
+			    chip->impedance_calculation_newmethod) {
+				status = oplus_voocphy_write_mesg_mask(TX0_DET_BIT3_TO_BIT7_MASK,
+						&chip->voocphy_tx_buff[0], chip->svooc_circuit_r_l
+						| (chip->fastchg_allow && chip->oplus_ap_fastchg_allow));
+				status = oplus_voocphy_write_mesg_mask(TX1_DET_BIT0_TO_BIT1_MASK,
+						&chip->voocphy_tx_buff[1], chip->svooc_circuit_r_h);
+			} else {
+				status = oplus_voocphy_write_mesg_mask(TX0_DET_BIT3_TO_BIT7_MASK,
+						&chip->voocphy_tx_buff[0], NO_VOOC2_CIRCUIT_R_L_DEF
+						| (chip->fastchg_allow && chip->oplus_ap_fastchg_allow));
+				status = oplus_voocphy_write_mesg_mask(TX1_DET_BIT0_TO_BIT1_MASK,
+						&chip->voocphy_tx_buff[1], NO_VOOC2_CIRCUIT_R_H_DEF);
+			}
 		}
 		break;
 	default:
@@ -3084,7 +3091,13 @@ static int oplus_voocphy_non_vooc20_handle_get_batt_vol_cmd(struct oplus_voocphy
 						}
 					}
 				} else {
-				vbatt1 = (chip->cp_vbus/2) - (signed)(chip->cp_vsys - chip->gauge_vbatt)/4 - (chip->cp_ichg * 75)/1000;
+					if (chip->chg_ctrl_by_sale_mode == SALE_MODE_COOL_DOWN_THREE &&
+					    chip->impedance_calculation_newmethod) {
+						vbatt1 = chip->cp_vac/2 - (signed)((chip->cp_vac - chip->cp_vbus) *
+							 (chip->cp_ichg / chip->master_cp_ichg)) / 2 - (chip->cp_ichg * 75)/1000;
+					} else {
+						vbatt1 = (chip->cp_vbus/2) - (signed)(chip->cp_vsys - chip->gauge_vbatt)/4 - (chip->cp_ichg * 75)/1000;
+					}
 				}
 			} else {
 				vbatt1 = chip->gauge_vbatt;
@@ -5128,7 +5141,7 @@ static int oplus_voocphy_curr_event_handle(struct device *dev, unsigned long dat
 	}
 
 	if (!chip->btb_temp_over) {//non btb temp over
-		if (vbat_temp_cur < discharge_threshold) {
+		if (vbat_temp_cur < discharge_threshold && (chip->plc_status != PLC_STATUS_ENABLE)) {
 			curr_over_count++;
 			if (curr_over_count > 6) {
 				voocphy_info("vcurr low than %dmA\n", discharge_threshold);
@@ -5620,7 +5633,7 @@ static int oplus_voocphy_safe_event_handle(struct device *dev, unsigned long dat
 	}
 
 	if (chip->plc_status == PLC_STATUS_ENABLE)
-		return status;
+		return oplus_voocphy_monitor_timer_start(chip, VOOC_THREAD_TIMER_SAFE, VOOC_SAFE_EVENT_TIME);
 
 	if (chip->fastchg_timeout_time)
 		chip->fastchg_timeout_time--;
@@ -7428,6 +7441,52 @@ static void oplus_voocphy_subscribe_plc_topic(struct oplus_mms *topic,
 		chip->plc_status = data.intval;
 }
 
+static void oplus_voocphy_comm_subs_callback(struct mms_subscribe *subs,
+					    enum mms_msg_type type, u32 id, bool sync)
+{
+	struct oplus_voocphy_manager *chip = subs->priv_data;
+	union mms_msg_data data = { 0 };
+
+	switch (type) {
+	case MSG_TYPE_ITEM:
+		switch (id) {
+		case COMM_ITEM_SALE_MODE:
+			oplus_mms_get_item_data(chip->comm_topic, id, &data,
+						false);
+			if (chip->chg_ctrl_by_sale_mode != SALE_MODE_COOL_DOWN_THREE)
+				chip->chg_ctrl_by_sale_mode = data.intval;
+			break;
+		default:
+			break;
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+static void oplus_voocphy_subscribe_comm_topic(struct oplus_mms *topic,
+					      void *prv_data)
+{
+	struct oplus_voocphy_manager *chip = prv_data;
+	union mms_msg_data data = { 0 };
+	int rc;
+
+	chip->comm_topic = topic;
+	chip->comm_subs = oplus_mms_subscribe(
+		chip->comm_topic, chip, oplus_voocphy_comm_subs_callback, "voocphy");
+	if (IS_ERR_OR_NULL(chip->comm_subs)) {
+		chg_err("subscribe common topic error, rc=%ld\n",
+			PTR_ERR(chip->comm_subs));
+		return;
+	}
+
+	rc = oplus_mms_get_item_data(chip->comm_topic, COMM_ITEM_SALE_MODE, &data,
+				true);
+	if (rc >= 0)
+		chip->chg_ctrl_by_sale_mode = data.intval;
+}
+
 int oplus_register_voocphy(struct oplus_voocphy_manager *chip)
 {
 	int ret;
@@ -7449,6 +7508,7 @@ int oplus_register_voocphy(struct oplus_voocphy_manager *chip)
 #endif
 
 	oplus_mms_wait_topic("plc", oplus_voocphy_subscribe_plc_topic, chip);
+	oplus_mms_wait_topic("common", oplus_voocphy_subscribe_comm_topic, chip);
 
 	return 0;
 }

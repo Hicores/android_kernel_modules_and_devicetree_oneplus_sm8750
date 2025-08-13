@@ -858,7 +858,7 @@ int32_t cam_ext_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 				reg_setting[i].delay     = vsyncsettings->reg_setting[i].delay;
 				reg_setting[i].data_mask = 0x00;
 				reg_setting[i].operation = vsyncsettings->reg_setting[i].operation;
-				CAM_EXT_INFO(CAM_EXT_SENSOR, "sensor is %s, reg_addr is %d, reg_data is %d, delay is %d, operation is %d",s_ctrl->io_master_info.sensor_name,reg_setting[i].reg_addr,reg_setting[i].reg_data,reg_setting[i].delay,reg_setting[i].operation);
+				CAM_EXT_INFO(CAM_EXT_SENSOR, "sensor is %s, reg_addr is 0x%x, reg_data is 0x%x, delay is %d, operation is %d",s_ctrl->io_master_info.sensor_name,reg_setting[i].reg_addr,reg_setting[i].reg_data,reg_setting[i].delay,reg_setting[i].operation);
 				if ((reg_setting[i].operation == CCI_WRITE_BURST || reg_setting[i].operation == CCI_WRITE_SEQUENTIAL) && m_support_continuous == FALSE){
 					m_support_continuous = TRUE;
 				}
@@ -878,6 +878,7 @@ int32_t cam_ext_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			CAM_EXT_INFO(CAM_EXT_SENSOR,"is_in_high_level is %d,is_vsync_enable is %d",s_ctrl->is_in_high_level,is_vsync_enable);
 			if(s_ctrl->is_in_high_level == TRUE && is_vsync_enable == TRUE)
 			{
+				CAM_EXT_ERR(CAM_SENSOR,"Blocks the operation of enabling vsync during the high level period.");
 				break;
 			}
 			camera_io_dev_write(&(s_ctrl->io_master_info), &write_setting);

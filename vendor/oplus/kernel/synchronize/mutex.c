@@ -87,14 +87,10 @@ static void mutex_set_inherit_ux(struct mutex *lock, struct task_struct *task)
 	owner = __mutex_owner(lock);
 
 	if ((is_ux || is_rt) && !test_inherit_ux(owner, INHERIT_UX_MUTEX)) {
-		int type = get_ux_state_type(owner);
-
-		if ((type == UX_STATE_NONE) || (type == UX_STATE_INHERIT)) {
-			if(is_ux)
-				set_inherit_ux(owner, INHERIT_UX_MUTEX, oplus_get_ux_depth(task), oplus_get_ux_state(task));
-			if(is_rt)
-				set_inherit_ux(owner, INHERIT_UX_MUTEX, oplus_get_ux_depth(task), SA_TYPE_LIGHT);
-		}
+		if(is_ux)
+			set_inherit_ux(owner, INHERIT_UX_MUTEX, oplus_get_ux_depth(task), oplus_get_ux_state(task));
+		if(is_rt)
+			set_inherit_ux(owner, INHERIT_UX_MUTEX, oplus_get_ux_depth(task), SA_TYPE_LIGHT);
 	}
 }
 
@@ -115,7 +111,7 @@ static void mutex_update_ux_cnt_when_add(struct mutex *lock)
 		return;
 
 	/* Record the ux flag when task is added to waiter list */
-	ots->lkinfo.is_block_ux = (ots->ux_state & 0xf) || (current->prio < MAX_RT_PRIO);
+	ots->lkinfo.is_block_ux = (ots->ux_state & SCHED_ASSIST_UX_MASK) || (current->prio < MAX_RT_PRIO);
 	if (ots->lkinfo.is_block_ux)
 		atomic_long_inc(&om->count);
 }
@@ -210,8 +206,8 @@ static void android_vh_mutex_opt_spin_start_handler(void *unused, struct mutex *
 		return;
 
 	delta = sched_clock() - ots->lkinfo.opt_spin_start_time;
-	if (((ots->ux_state & 0xf) && delta > mutex_ux_opt_spin_time_threshold) ||
-	    (!(ots->ux_state & 0xf) && delta > mutex_opt_spin_time_threshold)) {
+	if (((ots->ux_state & SCHED_ASSIST_UX_MASK) && delta > mutex_ux_opt_spin_time_threshold) ||
+	    (!(ots->ux_state & SCHED_ASSIST_UX_MASK) && delta > mutex_opt_spin_time_threshold)) {
 		/* Note: Should use atomic operations? */
 		mutex_opt_spin_timeout_exit_cnt++;
 		*time_out = true;
@@ -248,7 +244,7 @@ static void android_vh_mutex_can_spin_on_owner_handler(void *unused, struct mute
 		return;
 
 	/* ux and rt task just go */
-	if ((ots->ux_state & 0xf) || current->prio < MAX_RT_PRIO)
+	if ((ots->ux_state & SCHED_ASSIST_UX_MASK) || current->prio < MAX_RT_PRIO)
 		return;
 
 	/* If some ux or rt task is in the waiter list, non-ux can't optimistic spin. */

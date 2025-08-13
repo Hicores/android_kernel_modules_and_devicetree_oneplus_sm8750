@@ -1185,10 +1185,12 @@ static bool monitor_irq_bus_ready(struct syna_tcm *tcm)
 		moni->irq_need_dev_resume_all_count++;
 		moni->irq_bus_not_ready_count++;
 		TP_INFO(tcm->tp_index, "The device not resume %d ms!", tcm->irq_need_dev_resume_time);
+		/*
 		if (tcm->suspend_task && tcm->supspend_task_error_cnt < MAX_SUSPEND_TASK_DUMP_COUNT) {
 			tcm->supspend_task_error_cnt++;
 			sched_show_task(tcm->suspend_task);
 		}
+		*/
 		if (tcm->exception_upload_support) {
 			tp_exception_report(&tcm->exception_data, EXCEP_BUS_READY, "device not resume", sizeof("device not resume"));
 		}

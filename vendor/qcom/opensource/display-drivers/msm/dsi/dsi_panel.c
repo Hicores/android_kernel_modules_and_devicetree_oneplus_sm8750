@@ -4372,8 +4372,8 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 	if (panel_physical_type && !strcmp(panel_physical_type, "oled"))
 		panel->panel_type = DSI_DISPLAY_PANEL_TYPE_OLED;
 
-	panel->disable_cesta_hw_sleep = true;
-	//utils->read_bool(utils->data,"qcom,mdss-disable-cesta-hw-sleep");
+	panel->disable_cesta_hw_sleep = utils->read_bool(utils->data,
+				"qcom,mdss-disable-cesta-hw-sleep");
 
 	rc = dsi_panel_parse_host_config(panel);
 	if (rc) {
