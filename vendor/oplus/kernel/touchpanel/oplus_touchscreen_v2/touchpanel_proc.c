@@ -492,6 +492,11 @@ static ssize_t fp_grip_support_write(struct file *file,
 				ts->ts_ops->mode_switch(ts->chip_data, MODE_GESTURE, true);
 			}
 		}
+
+		if (!(value & FP_GRIP_ENABLE)) {
+			ts->fp_grip_hold = false;
+			touch_call_fp_grip(ts, 0);
+		}
 	}
 
 	mutex_unlock(&ts->mutex);
@@ -501,6 +506,77 @@ OUT:
 }
 
 DECLARE_PROC_OPS(fp_grip_support_ops, simple_open, fp_grip_support_read, fp_grip_support_write, NULL);
+
+/*proc/touchpanel/fp_unlock_status*/
+static ssize_t proc_fp_unlock_status_write(struct file *file, const char __user *buffer,
+				  size_t count, loff_t *ppos)
+{
+	int ret = 0;
+	int value = 0;
+	char buf[4] = {0};
+	struct touchpanel_data *ts = PDE_DATA(file_inode(file));
+
+	if (!ts) {
+		TPD_INFO("%s: ts is NULL\n", __func__);
+		return count;
+	}
+
+	if (!ts->ts_ops->fp_unlock_status_write) {
+		TS_TP_INFO("not support ts_ops->fp_unlock_status_write callback\n");
+		return count;
+	}
+
+	if (!ts->fp_unlock_status_support) {
+		TS_TP_INFO("not support fp_unlock_status_support.\n");
+		return count;
+	}
+
+	tp_copy_from_user(buf, sizeof(buf), buffer, count, 4);
+
+	if (kstrtoint(buf, 10, &value)) {
+		TP_INFO(ts->tp_index, "%s: kstrtoint error\n", __func__);
+		return count;
+	}
+
+	if (value < 0 || value > 255) {
+		TP_INFO(ts->tp_index, "%s: value:%d is error\n", __func__, value);
+		return count;
+	}
+
+	mutex_lock(&ts->mutex);
+	ts->fp_unlock_status = value;
+	TP_INFO(ts->tp_index, "%s: fp_unlock_status value=%d\n", __func__, value);
+	ret = ts->ts_ops->fp_unlock_status_write(ts->chip_data, ts->fp_unlock_status);
+	if (ret < 0) {
+		TS_TP_INFO("%s, Touchpanel fp_unlock_status_write failed\n", __func__);
+	}
+	mutex_unlock(&ts->mutex);
+
+	return count;
+}
+
+static ssize_t proc_fp_unlock_status_read(struct file *file, char __user *buffer,
+				 size_t count, loff_t *ppos)
+{
+	int ret = 0;
+	char page[PAGESIZE] = {0};
+	struct touchpanel_data *ts = PDE_DATA(file_inode(file));
+
+	if (!ts) {
+		snprintf(page, PAGESIZE - 1, "%d\n", -1); /*no support*/
+		TPD_INFO("fp_unlock_status is no support \n");
+		ret = simple_read_from_buffer(buffer, count, ppos, page, strlen(page));
+		return ret;
+	} else {
+		/*support*/
+		snprintf(page, PAGESIZE - 1, "%d.\n", ts->fp_unlock_status);
+		ret = simple_read_from_buffer(buffer, count, ppos, page, strlen(page));
+		return ret;
+	}
+}
+
+DECLARE_PROC_OPS(fp_unlock_status_ops, simple_open,
+		  proc_fp_unlock_status_read, proc_fp_unlock_status_write, NULL);
 
 static ssize_t proc_waterproof_read(struct file *file, char __user *buffer,
 				       size_t count, loff_t *ppos)
@@ -798,6 +874,9 @@ static ssize_t proc_gesture_control_write(struct file *file,
 		if (ts->ts_ops->notify_keyboard_open && ts->is_hall_near_resume) {
 			ts->ts_ops->notify_keyboard_open(ts->chip_data);
 			ts->is_hall_near_resume = false;
+			if (ts->health_monitor_support) {
+				tp_healthinfo_report(&ts->monitor_data, HEALTH_REPORT, "hall_near_resume");
+			}
 		}
 		break;
 	case 6:
@@ -2642,7 +2721,8 @@ static void touch_scen_config_write(struct touchpanel_data *ts, char *input, int
 		mutex_unlock(&ts->mutex);
 		break;
 	case 2:
-		TPD_INFO("set_package_type not used.\n");
+		scene_info->set_package_type = value;
+		TPD_INFO("set_package_type is %d\n", scene_info->set_package_type);
 		break;
 	case 3:
 		TPD_INFO("pen_sensitive_level:%u set value:%d.\n", scene_info->pen_sensitive_level, value);
@@ -5097,6 +5177,7 @@ int init_touchpanel_proc_part3(struct touchpanel_data *ts, struct proc_dir_entry
 			ts->leather_cover_mode_support
 		},
 		{"fp_grip_enable", 0666, NULL, &fp_grip_support_ops, ts, false, ts->fp_grip_support},
+		{"fp_unlock_status", 0666, NULL, &fp_unlock_status_ops, ts, false, ts->fp_unlock_status_support},
 	};
 
 

@@ -230,6 +230,7 @@ enum dynamic_config_id {
 	DC_FREQUENCE_HOPPING = 0xD2,
 	DC_SET_REPORT_FRE = 0x11,
 	DC_GLOVE_MODE_ENABLED = 0x0D,
+	DC_GLOVE_MODE_STATE = 0xF5,
 };
 
 enum command {

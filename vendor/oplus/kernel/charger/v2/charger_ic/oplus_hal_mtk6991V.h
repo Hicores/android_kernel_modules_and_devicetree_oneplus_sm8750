@@ -24,6 +24,7 @@
 
 #ifdef OPLUS_FEATURE_CHG_BASIC
 #include <oplus_chg_ic.h>
+#include <oplus_chg_pps.h>
 #endif
 
 #define CHARGING_INTERVAL	10
@@ -590,7 +591,13 @@ struct mtk_charger {
 	int wls_boost_vol_max_mv;
 
 	int sub_btb_valid_adc[OPLUS_SUB_BTB_MAX];
-	struct delayed_work	publish_close_cp_item_work;
+	int pd_chg_volt;
+	struct delayed_work sourcecap_done_work;
+	struct delayed_work charger_suspend_recovery_work;
+	struct delayed_work publish_close_cp_item_work;
+	struct delayed_work svid_check_work;
+	pd_msg_data pdo[PPS_PDO_MAX];
+	int cap_nr;
 #endif
 };
 

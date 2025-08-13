@@ -1668,11 +1668,16 @@ static void sde_encoder_phys_cmd_tearcheck_config(struct sde_encoder_phys *phys_
 		phys_enc->hw_pp->ops.enable_tearcheck(phys_enc->hw_pp,
 				tc_enable);
 	}
-
-	if (qsync_mode && cmd_enc->base.hw_intf->ops.enable_te_level_trigger &&
-			!sde_enc->disp_info.is_te_using_watchdog_timer)
-		cmd_enc->base.hw_intf->ops.enable_te_level_trigger(cmd_enc->base.hw_intf,
-			qsync_mode && !panel_dead);
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+	if (!oplus_adfr_is_oa_use_fixed_te(phys_enc)) {
+#endif /* OPLUS_FEATURE_DISPLAY_ADFR */
+		if (qsync_mode && cmd_enc->base.hw_intf->ops.enable_te_level_trigger &&
+				!sde_enc->disp_info.is_te_using_watchdog_timer)
+			cmd_enc->base.hw_intf->ops.enable_te_level_trigger(cmd_enc->base.hw_intf,
+				qsync_mode && !panel_dead);
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+	}
+#endif /* OPLUS_FEATURE_DISPLAY_ADFR */
 }
 
 static void _sde_encoder_phys_cmd_pingpong_config(
@@ -2008,39 +2013,41 @@ static int sde_encoder_phys_cmd_prepare_for_kickoff(
 	}
 
 #ifdef OPLUS_FEATURE_DISPLAY_ADFR
-	oplus_adfr_force_off_osync_mode(phys_enc);
-	if (oplus_adfr_osync_tearcheck_update(phys_enc) != -ENOTSUPP) {
-		SDE_DEBUG_CMDENC(cmd_enc, "use custom function\n");
-	} else {
+	if (!oplus_adfr_is_oa_use_fixed_te(phys_enc)) {
+		oplus_adfr_force_off_osync_mode(phys_enc);
+		if (oplus_adfr_osync_tearcheck_update(phys_enc) != -ENOTSUPP) {
+			SDE_DEBUG_CMDENC(cmd_enc, "use custom function\n");
+		} else {
 #endif /* OPLUS_FEATURE_DISPLAY_ADFR */
-	if (sde_connector_is_qsync_updated(phys_enc->connector)) {
-		u32 threshold, cfg_height, start_pos;
+		if (sde_connector_is_qsync_updated(phys_enc->connector)) {
+			u32 threshold, cfg_height, start_pos;
 
-		_get_tearcheck_cfg(phys_enc, &threshold, &cfg_height, &start_pos);
-		tc_cfg.sync_threshold_start = threshold;
-		tc_cfg.start_pos = start_pos;
-		cmd_enc->qsync_threshold_lines = tc_cfg.sync_threshold_start;
-		if (phys_enc->has_intf_te &&
-				phys_enc->hw_intf->ops.update_tearcheck)
-			phys_enc->hw_intf->ops.update_tearcheck(
-					phys_enc->hw_intf, &tc_cfg);
-		else if (phys_enc->hw_pp->ops.update_tearcheck)
-			phys_enc->hw_pp->ops.update_tearcheck(
-					phys_enc->hw_pp, &tc_cfg);
+			_get_tearcheck_cfg(phys_enc, &threshold, &cfg_height, &start_pos);
+			tc_cfg.sync_threshold_start = threshold;
+			tc_cfg.start_pos = start_pos;
+			cmd_enc->qsync_threshold_lines = tc_cfg.sync_threshold_start;
+			if (phys_enc->has_intf_te &&
+					phys_enc->hw_intf->ops.update_tearcheck)
+				phys_enc->hw_intf->ops.update_tearcheck(
+						phys_enc->hw_intf, &tc_cfg);
+			else if (phys_enc->hw_pp->ops.update_tearcheck)
+				phys_enc->hw_pp->ops.update_tearcheck(
+						phys_enc->hw_pp, &tc_cfg);
 
-		qsync_mode = sde_connector_get_qsync_mode(phys_enc->connector);
-		panel_dead = sde_connector_panel_dead(phys_enc->connector);
+			qsync_mode = sde_connector_get_qsync_mode(phys_enc->connector);
+			panel_dead = sde_connector_panel_dead(phys_enc->connector);
 
-		if (cmd_enc->base.hw_intf->ops.enable_te_level_trigger &&
-				!sde_enc->disp_info.is_te_using_watchdog_timer)
-			cmd_enc->base.hw_intf->ops.enable_te_level_trigger(cmd_enc->base.hw_intf,
-					qsync_mode && !panel_dead);
+			if (cmd_enc->base.hw_intf->ops.enable_te_level_trigger &&
+					!sde_enc->disp_info.is_te_using_watchdog_timer)
+				cmd_enc->base.hw_intf->ops.enable_te_level_trigger(cmd_enc->base.hw_intf,
+						qsync_mode && !panel_dead);
 
-		SDE_EVT32(DRMID(phys_enc->parent), tc_cfg.sync_threshold_start, tc_cfg.start_pos,
-				qsync_mode, sde_enc->disp_info.is_te_using_watchdog_timer,
-				panel_dead, SDE_EVTLOG_FUNC_CASE3);
-	}
+			SDE_EVT32(DRMID(phys_enc->parent), tc_cfg.sync_threshold_start, tc_cfg.start_pos,
+					qsync_mode, sde_enc->disp_info.is_te_using_watchdog_timer,
+					panel_dead, SDE_EVTLOG_FUNC_CASE3);
+		}
 #ifdef OPLUS_FEATURE_DISPLAY_ADFR
+		}
 	}
 #endif /* OPLUS_FEATURE_DISPLAY_ADFR */
 

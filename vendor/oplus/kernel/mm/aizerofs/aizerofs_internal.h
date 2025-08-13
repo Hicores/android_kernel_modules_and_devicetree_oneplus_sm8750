@@ -60,6 +60,7 @@ extern int aizerofs_handle_drop_caches(unsigned long arg);
 extern unsigned long dmabuf_cache_shrink(gfp_t gfp_mask, unsigned long nr_to_scan,
 					struct aizerofs_dma_buf_cache *target_cache);
 extern void dmabuf_cache_destroy(struct aizerofs_dma_buf_cache *target_cache);
-
+extern bool is_overlayfs(struct file *filp);
+int aizerofs_set_scene(unsigned long arg);
 #endif
 

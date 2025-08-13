@@ -31,6 +31,8 @@ _platform_map = {
             {"name": "erhai-24976-sun-overlay-DVT.dtbo"},
             {"name": "erhai-24976-eu-sun-overlay.dtbo"},
             {"name": "erhai-24976-eu-sun-overlay-DVT.dtbo"},
+            {"name": "erhai-24974-sun-overlay.dtbo"},
+            {"name": "erhai-24974-eu-sun-overlay.dtbo"},
         ],
     },
     "tuna": {

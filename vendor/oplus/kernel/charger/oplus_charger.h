@@ -1341,6 +1341,7 @@ struct oplus_chg_chip {
 	bool suspend_after_full;
 	bool check_batt_full_by_sw;
 	bool external_gauge;
+	bool check_hmac_with_battery_id;
 	bool external_authenticate;
 	bool chg_ctrl_by_lcd;
 	bool chg_ctrl_by_lcd_default;

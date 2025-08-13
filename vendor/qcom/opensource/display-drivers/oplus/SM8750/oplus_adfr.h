@@ -155,6 +155,7 @@ struct oplus_adfr_params {
 	unsigned int stabilize_frame_type;				/* a value used to indicates stabilize frame type */
 	unsigned long current_wr_rd_irq_interval;		/* a value used to indicates current wr rd ptr interval */
 	unsigned long last_wr_rd_irq_interval;			/* a value used to indicates last wr rd ptr interval */
+	bool oa_use_fixed_te;							/* indicates whether oa use fixed te or not */
 };
 
 /* log level config */
@@ -258,6 +259,7 @@ int oplus_adfr_need_force_off_osync_mode(void *dsi_display, bool need_force_off_
 int oplus_adfr_force_off_osync_mode(void *sde_encoder_phys);
 int oplus_adfr_need_resend_osync_cmd(void *dsi_display, bool need_resend_osync_cmd);
 int oplus_adfr_resend_osync_cmd(void *dsi_display);
+bool oplus_adfr_is_oa_use_fixed_te(void *sde_encoder_phys);
 
 /* -------------------- node -------------------- */
 /* adfr_config */

@@ -76,8 +76,10 @@ struct oplus_pwm_turbo_params {
 	bool pwm_power_on;
 	bool pwm_hbm_state;
 	bool pwm_state_changed;
-	int pwm_cmd_replace_map[2][MAX_PWM_CMD];                      /* Mapping table of cmds unique to PWM case to original cmds  */
-	int pwm_cmd_replace_map_count;
+	int pwm_mode1_cmd_replace_map[2][MAX_PWM_CMD];                      /* Mapping table of cmds unique to PWM mode1 case to original cmds  */
+	int pwm_mode1_cmd_replace_map_count;
+	int pwm_mode2_cmd_replace_map[2][MAX_PWM_CMD];                      /* Mapping table of cmds unique to PWM mode2 case to original cmds  */
+	int pwm_mode2_cmd_replace_map_count;
 	ktime_t aod_off_timestamp;
 	struct workqueue_struct *oplus_pwm_dbv_ext_cmd_wq;
 	struct work_struct oplus_pwm_dbv_ext_cmd_work;

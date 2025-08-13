@@ -225,6 +225,7 @@ audio_modules.register(
 # Add for extend_codec_i2s_be_dailinks dependency
             ":%b_oplus_audio_extend",
             ":%b_oplus_audio_daemon",
+            ":%b_oplus_audio_netlink",
 	],
 )
 # >>>> ASOC/CODEC MODULES <<<<
@@ -647,5 +648,16 @@ audio_modules.register(
     ],
     deps = [":%b_adsp_loader_dlkm",
     ],
+)
+# add for oplus audio netlink kernel communication
+# >>>>  oplus audio netlink kernel MODULES <<<<
+audio_modules.register(
+    name = "oplus_audio_netlink",
+    path = "oplus/oplus_audio_netlink",
+    config_option = "CONFIG_AUDIO_NETLINK_KERNEL",
+    srcs = [
+        "oplus_audio_netlink_kernel.c",
+    ],
+    deps = [":audio_netlink_headers"],
 )
 #endif /* OPLUS_ARCH_EXTENDS */

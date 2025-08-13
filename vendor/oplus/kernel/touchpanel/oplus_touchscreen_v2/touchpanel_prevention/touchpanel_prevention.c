@@ -246,6 +246,25 @@ static void get_make_up_point_num(struct kernel_grip_info *grip_info,
 static void get_makeup_point_xy(struct kernel_grip_info *grip_info,
                                  uint8_t index, struct point_info *point)
 {
+	int32_t speed_x = grip_info->uniform_make_up_point_x_move_speed[index];
+	int32_t speed_y = grip_info->uniform_make_up_point_y_move_speed[index];
+	int32_t input_x = grip_info->uniform_make_up_last_input_point_x[index];
+	int32_t input_y = grip_info->uniform_make_up_last_input_point_y[index];
+	int32_t last_output_x = grip_info->uniform_last_make_up_prevent_out_x[index];
+	int32_t last_output_y = grip_info->uniform_last_make_up_prevent_out_y[index];
+	int32_t tmpx = abs(input_x - last_output_x);
+	int32_t tmpy = abs(input_y - last_output_y);
+	u16 speed_jitter = grip_info->uniform_make_up_last_point_percent_limit + 10;
+
+	if (((speed_x * speed_x + speed_y * speed_y) * speed_jitter / 10) > (tmpx * tmpx + tmpy * tmpy)) {
+		grip_info->uniform_make_up_x_shift_leftover[index] = 0;
+		grip_info->uniform_make_up_y_shift_leftover[index] = 0;
+		grip_info->uniform_make_up_point_num_status[index] = 0;
+		point->x = input_x;
+		point->y = input_y;
+		return;
+	}
+
 	grip_info->uniform_make_up_x_shift_leftover[index] -=
 		grip_info->uniform_make_up_x_shift_leftover[index] / grip_info->uniform_make_up_point_num_status[index];
 	grip_info->uniform_make_up_y_shift_leftover[index] -=

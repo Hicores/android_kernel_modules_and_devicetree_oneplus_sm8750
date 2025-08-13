@@ -13,7 +13,7 @@
 #include <linux/module.h>
 #include <linux/net.h>
 #include <linux/vmalloc.h>
-#include "../zstd/include/zstd.h"
+#include "include/zstd.h"
 #include <crypto/internal/scompress.h>
 
 

@@ -50,12 +50,12 @@ int32_t oplus_cam_actuator_construct_default_power_setting(
 	power_info->power_setting[pwr_up_count].delay = 2;
 	pwr_up_count++;
 
-	if(true == a_ctrl->power_custom1_reg)
+	if(true == a_ctrl->power_custom2_reg)
 	{
-		power_info->power_setting[pwr_up_count].seq_type = SENSOR_CUSTOM_REG1;
-		power_info->power_setting[pwr_up_count].seq_val = CAM_V_CUSTOM1;
+		power_info->power_setting[pwr_up_count].seq_type = SENSOR_CUSTOM_REG2;
+		power_info->power_setting[pwr_up_count].seq_val = CAM_V_CUSTOM2;
 		power_info->power_setting[pwr_up_count].config_val = 1;
-		power_info->power_setting[pwr_up_count].delay = 8;
+		power_info->power_setting[pwr_up_count].delay = 1;
 		pwr_up_count++;
 	}
 
@@ -64,6 +64,15 @@ int32_t oplus_cam_actuator_construct_default_power_setting(
 	power_info->power_setting[pwr_up_count].config_val = 1;
 	power_info->power_setting[pwr_up_count].delay = 10;
 	pwr_up_count++;
+
+	if(true == a_ctrl->power_custom1_reg)
+	{
+		power_info->power_setting[pwr_up_count].seq_type = SENSOR_CUSTOM_REG1;
+		power_info->power_setting[pwr_up_count].seq_val = CAM_V_CUSTOM1;
+		power_info->power_setting[pwr_up_count].config_val = 1;
+		power_info->power_setting[pwr_up_count].delay = 8;
+		pwr_up_count++;
+	}
 
 	if (a_ctrl->power_setting_size)
 	{
@@ -88,7 +97,7 @@ int32_t oplus_cam_actuator_construct_default_power_setting(
 	{
 		power_info->power_down_setting[pwr_down_count].seq_type = SENSOR_CUSTOM_REG1;
 		power_info->power_down_setting[pwr_down_count].seq_val = CAM_V_CUSTOM1;
-		power_info->power_down_setting[pwr_down_count].config_val = 1;
+		power_info->power_down_setting[pwr_down_count].config_val = 0;
 		power_info->power_down_setting[pwr_down_count].delay = 0;
 		pwr_down_count++;
 	}
@@ -98,6 +107,15 @@ int32_t oplus_cam_actuator_construct_default_power_setting(
 	power_info->power_down_setting[pwr_down_count].config_val = 0;
 	power_info->power_down_setting[pwr_down_count].delay = 1;
 	pwr_down_count++;
+
+	if(true == a_ctrl->power_custom2_reg)
+	{
+		power_info->power_down_setting[pwr_down_count].seq_type = SENSOR_CUSTOM_REG2;
+		power_info->power_down_setting[pwr_down_count].seq_val = CAM_V_CUSTOM2;
+		power_info->power_down_setting[pwr_down_count].config_val = 0;
+		power_info->power_down_setting[pwr_down_count].delay = 0;
+		pwr_down_count++;
+	}
 
 	power_info->power_down_setting[pwr_down_count].seq_type = SENSOR_VIO;
 	power_info->power_down_setting[pwr_down_count].seq_val = CAM_VIO;

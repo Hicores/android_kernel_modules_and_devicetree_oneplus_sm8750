@@ -1846,10 +1846,11 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 
 #ifdef OPLUS_FEATURE_CAMERA_COMMON
 			if ((rc == -EAGAIN || rc == -ETIMEDOUT || rc == -EINVAL) &&
+			((s_ctrl->io_master_info.master_type == CCI_MASTER) || (s_ctrl->io_master_info.master_type == I2C_MASTER))) {
 #else
 			if ((rc == -EAGAIN) &&
-#endif
 			(s_ctrl->io_master_info.master_type == CCI_MASTER)) {
+#endif
 				/* If CCI hardware is resetting we need to wait
 				 * for sometime before reapply
 				 */

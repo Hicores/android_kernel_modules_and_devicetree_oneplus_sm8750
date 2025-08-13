@@ -102,7 +102,7 @@ struct sc8547d_device {
 	bool use_slave_cp;
 	bool vac_support;
 	bool ic_sc8547d;
-	bool enable_otg;
+	bool otg_connected;
 	bool always_otg_en;
 	bool work_start;
 	bool boot_online;
@@ -1112,7 +1112,7 @@ static int sc8547_init_device(struct sc8547d_device *chip)
 	sc8547_update_bits(chip->client, SC8547_REG_09, SC8547_IBUS_UCP_RISE_MASK_MASK,
 			   (1 << SC8547_IBUS_UCP_RISE_MASK_SHIFT));
 	sc8547_write_byte(chip->client, SC8547_REG_10, 0x02); /* mask insert irq */
-	if (chip->always_otg_en)
+	if (chip->always_otg_en || chip->otg_connected)
 		sc8547_update_bits(chip->client, SC8547D_ADDR_OTG_EN, SC8547D_OTG_EN_MASK, 0x04);
 	return 0;
 }
@@ -1155,15 +1155,17 @@ static int sc8547_voocphy_init_vooc(struct oplus_voocphy_manager *voocphy)
 	return 0;
 }
 
-static int sc8547_svooc_hw_setting(struct sc8547d_device *chip)
+static int sc8547_svooc_hw_setting(struct sc8547d_device *chip, bool wdt_cfg)
 {
 	u8 reg_data;
 	sc8547_write_byte(chip->client, SC8547_REG_02, 0x01); /*VAC_OVP:12v*/
 	sc8547_write_byte(chip->client, SC8547_REG_04, chip->vbus_ovp_reg); /*VBUS_OVP:10v*/
 	reg_data = 0x10 | (chip->ocp_reg & 0xf);
-	sc8547_write_byte(chip->client, SC8547_REG_05,
-			  reg_data); /*IBUS_OCP_UCP:3.6A*/
-	sc8547_write_byte(chip->client, SC8547_REG_09, 0x13); /*WD:1000ms*/
+	sc8547_write_byte(chip->client, SC8547_REG_05, reg_data); /*IBUS_OCP_UCP:3.6A*/
+	if (wdt_cfg)
+		sc8547_write_byte(chip->client, SC8547_REG_09, 0x13); /*WD:1000ms*/
+	else
+		sc8547_update_bits(chip->client, SC8547_REG_09, 0x90, 0x10); /* 2:1, IBUS_UCP_RISE_MASK */
 	sc8547_update_bits(chip->client, SC8547_REG_11, SC8547_ADC_EN_MASK, SC8547_ADC_EN_MASK); /*ADC_CTRL:ADC_EN*/
 	sc8547_write_byte(chip->client, SC8547_REG_0D, 0x70);
 	/*sc8547_write_byte(chip->client, SC8547_REG_2B, 0x81);*/ /*VOOC_CTRL,send handshake*/
@@ -1173,12 +1175,15 @@ static int sc8547_svooc_hw_setting(struct sc8547d_device *chip)
 	return 0;
 }
 
-static int sc8547_vooc_hw_setting(struct sc8547d_device *chip)
+static int sc8547_vooc_hw_setting(struct sc8547d_device *chip, bool wdt_cfg)
 {
 	sc8547_write_byte(chip->client, SC8547_REG_02, 0x07); /*VAC_OVP:*/
 	sc8547_write_byte(chip->client, SC8547_REG_04, 0x64); /*VBUS_OVP:11V*/
 	sc8547_write_byte(chip->client, SC8547_REG_05, 0x1c); /*IBUS_OCP_UCP:*/
-	sc8547_write_byte(chip->client, SC8547_REG_09, 0x93); /*WD:1000ms*/
+	if (wdt_cfg)
+		sc8547_write_byte(chip->client, SC8547_REG_09, 0x93); /*WD:1000ms*/
+	else
+		sc8547_update_bits(chip->client, SC8547_REG_09, 0x90, 0x90); /* 1:1, IBUS_UCP_RISE_MASK */
 	sc8547_update_bits(chip->client, SC8547_REG_11, SC8547_ADC_EN_MASK, SC8547_ADC_EN_MASK); /*ADC_CTRL:ADC_EN*/
 	sc8547_write_byte(chip->client, SC8547_REG_33, 0xd1); /*Loose_det*/
 	sc8547_write_byte(chip->client, SC8547_REG_34, 0x60);
@@ -1234,11 +1239,11 @@ static int sc8547_voocphy_hw_setting(struct oplus_voocphy_manager *voocphy, int 
 		chg_info("SETTING_REASON_RESET OR PROBE\n");
 		break;
 	case SETTING_REASON_SVOOC:
-		sc8547_svooc_hw_setting(chip);
+		sc8547_svooc_hw_setting(chip, true);
 		chg_info("SETTING_REASON_SVOOC\n");
 		break;
 	case SETTING_REASON_VOOC:
-		sc8547_vooc_hw_setting(chip);
+		sc8547_vooc_hw_setting(chip, true);
 		chg_info("SETTING_REASON_VOOC\n");
 		break;
 	case SETTING_REASON_5V2A:
@@ -2130,7 +2135,6 @@ static int sc8547_irq_register(struct sc8547d_device *chip)
 				voocphy->irq, ret);
 			return ret;
 		}
-		enable_irq_wake(voocphy->irq);
 		chg_debug("request irq ok\n");
 	}
 
@@ -2164,12 +2168,8 @@ static void sc8547d_otg_enabled_work(struct work_struct *work)
 
 	oplus_mms_get_item_data(chip->wired_topic,  WIRED_ITEM_OTG_ENABLE, &data, false);
 	chg_info("otg enable_value = %d\n", data.intval);
-	if (data.intval) {
-		if (chip->enable_otg)
-			sc8547_write_byte(chip->client, SC8547D_ENABLE_OTG_REG, 0xE0);
-	} else {
-		if (chip->enable_otg)
-			sc8547_write_byte(chip->client, SC8547D_ENABLE_OTG_REG, 0x02);
+	if (data.intval == 0) {
+		chip->otg_connected = false;
 		if (!chip->always_otg_en)
 			sc8547_update_bits(chip->client, SC8547D_ADDR_OTG_EN, SC8547D_OTG_EN_MASK, 0x0);
 	}
@@ -2482,9 +2482,9 @@ static int sc8547d_cp_set_work_mode(struct oplus_chg_ic_dev *ic_dev, enum oplus_
 	}
 
 	if (mode == CP_WORK_MODE_BYPASS)
-		rc = sc8547_vooc_hw_setting(chip);
+		rc = sc8547_vooc_hw_setting(chip, false);
 	else
-		rc = sc8547_svooc_hw_setting(chip);
+		rc = sc8547_svooc_hw_setting(chip, false);
 
 	if (rc < 0)
 		chg_err("[%s] set work mode to %d error\n", chip->dev->of_node->name, mode);
@@ -2729,13 +2729,13 @@ static int sc8547d_cp_get_work_status(struct oplus_chg_ic_dev *ic_dev, bool *sta
 	}
 	chip = oplus_chg_ic_get_priv_data(ic_dev);
 
-	rc = sc8547_read_byte(chip->client, SC8547_REG_07, &data);
+	rc = sc8547_read_byte(chip->client, SC8547_REG_06, &data);
 	if (rc < 0) {
-		chg_err("[%s] read SC8547_REG_07 error, rc=%d\n", chip->dev->of_node->name, rc);
+		chg_err("[%s] read SC8547_REG_06 error, rc=%d\n", chip->dev->of_node->name, rc);
 		return rc;
 	}
 
-	*start = data & BIT(7);
+	*start = (data & SC8547_CP_SWITCHING_STAT_MASK) ? true : false;
 
 	return 0;
 }
@@ -3136,6 +3136,7 @@ static void sc8547d_wired_topic_callback(struct mms_subscribe *subs, enum mms_ms
 	case MSG_TYPE_ITEM:
 		switch (id) {
 		case WIRED_ITEM_PRE_OTG_ENABLE:
+			chip->otg_connected = true;
 			sc8547_update_bits(chip->client, SC8547D_ADDR_OTG_EN, SC8547D_OTG_EN_MASK, 0x04);
 			break;
 		case WIRED_ITEM_OTG_ENABLE:
@@ -3249,11 +3250,10 @@ static int sc8547d_driver_probe(struct i2c_client *client,
 	chip->use_ufcs_phy = of_property_read_bool(chip->dev->of_node, "oplus,use_ufcs_phy");
 	chip->use_slave_cp = of_property_read_bool(chip->dev->of_node, "oplus,use_slave_cp");
 	chip->vac_support = of_property_read_bool(chip->dev->of_node, "oplus,vac_support");
-	chip->enable_otg = of_property_read_bool(chip->dev->of_node, "oplus,enable_otg");
 	chip->always_otg_en = of_property_read_bool(chip->dev->of_node, "oplus,always_otg_en");
-	chg_info("use_vooc_phy=%d, use_ufcs_phy=%d, use_slave_cp=%d, vac_support=%d, enable_otg=%d always_otg_en=%d\n",
+	chg_info("use_vooc_phy=%d, use_ufcs_phy=%d, use_slave_cp=%d, vac_support=%d, always_otg_en=%d\n",
 		 chip->use_vooc_phy, chip->use_ufcs_phy, chip->use_slave_cp, chip->vac_support,
-		 chip->enable_otg, chip->always_otg_en);
+		 chip->always_otg_en);
 
 	if (chip->use_vooc_phy) {
 		rc = sc8547_charger_choose(chip);

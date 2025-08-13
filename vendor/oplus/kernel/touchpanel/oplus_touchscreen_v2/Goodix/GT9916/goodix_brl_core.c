@@ -633,6 +633,30 @@ static int goodix_enable_charge_mode(struct chip_data_brl *chip_info, bool enabl
 	return ret;
 }
 
+static int goodix_scene_handle(struct chip_data_brl *chip_info)
+{
+	uint16_t package_type = 0;
+	int ret = 0;
+
+	if (chip_info->ts == NULL) {
+		TPD_INFO("GT_brlD:%s, chip_info->ts == NULL\n", __func__);
+		return -1;
+	}
+	package_type = chip_info->ts->scene_info.set_package_type;
+
+	switch (package_type) {
+	case GTP_SCENE_TYPE_MASK:
+		TPD_INFO("GT_brlD:%s, TYPE:%d send %d to game in scene mode\n", __func__, GTP_SCENE_TYPE_MASK, GTP_HIGH_LOCK_GAME);
+		ret = goodix_send_cmd_simple(chip_info, GTP_CMD_GAME_MODE, GTP_HIGH_LOCK_GAME);
+		break;
+	default:
+		ret = goodix_send_cmd_simple(chip_info, GTP_CMD_GAME_MODE, GTP_MASK_ENABLE);
+		break;
+	}
+
+	return ret;
+}
+
 static int goodix_enable_game_mode(struct chip_data_brl *chip_info, bool enable)
 {
 	int ret = 0;
@@ -643,7 +667,7 @@ static int goodix_enable_game_mode(struct chip_data_brl *chip_info, bool enable)
 		goodix_check_bit_set(chip_info, GAME_MODE_ENABLE, true);
 		goodix_state_verify(chip_info);
 		msleep(10);
-		ret = goodix_send_cmd_simple(chip_info, GTP_CMD_GAME_MODE, GTP_MASK_ENABLE);
+		ret = goodix_scene_handle(chip_info);
 		TPD_INFO("GT_brlD:%s: GTP_CMD_ENTER_GAME_MODE\n", __func__);
 	} else {
 		ret = goodix_send_cmd_simple(chip_info, GTP_CMD_GAME_MODE, GTP_MASK_DISABLE);

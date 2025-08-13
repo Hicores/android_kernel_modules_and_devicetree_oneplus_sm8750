@@ -1349,7 +1349,6 @@ static int bq2589x_cfg_dpdm2hiz_mode(struct bq2589x *bq)
 
 static void oplus_chg_awake_init(struct bq2589x *bq)
 {
-	bq->suspend_ws = NULL;
 	if (!bq) {
 		pr_err("[%s]bq is null\n", __func__);
 		return;
@@ -1379,7 +1378,6 @@ static void oplus_chg_wakelock(struct bq2589x *bq, bool awake)
 
 static void oplus_keep_resume_awake_init(struct bq2589x *bq)
 {
-	bq->keep_resume_ws = NULL;
 	if (!bq) {
 		pr_err("[%s]bq is null\n", __func__);
 		return;
@@ -2469,9 +2467,6 @@ void oplus_bq2589x_set_mivr_by_battery_vol(void)
 		mV = BATT_VOL_4V4;
 	}
 
-	if(mV < BATT_VOL_4V4)
-		mV = BATT_VOL_4V4;
-
 	bq2589x_set_input_volt_limit(g_bq, mV);
 }
 
@@ -2519,7 +2514,7 @@ int oplus_bq2589x_set_aicr(int current_ma)
 				aicl_point_temp = aicl_point = 4500;
 		}
 	} else {
-		if (chip->batt_volt > BATT_VOL_4V1)
+		if (chip && chip->batt_volt > BATT_VOL_4V1)
 			aicl_point_temp = aicl_point = 4550;
 		else
 			aicl_point_temp = aicl_point = 4500;
@@ -2597,6 +2592,7 @@ int oplus_bq2589x_set_aicr(int current_ma)
 	aicl_point_temp = aicl_point;
 	bq2589x_set_input_current_limit(g_bq, usb_icl[i]);
 	msleep(90);
+	chg_vol = mt6357_get_vbus_voltage();
 	if (chg_vol < aicl_point_temp) {
 		i =  i - 2; /* 1.5 */
 		goto aicl_pre_step;
@@ -2971,7 +2967,8 @@ int oplus_bq2589x_charger_suspend(void)
 		g_oplus_chip->slave_charger_enable = false;
 		g_oplus_chip->sub_chg_ops->charger_suspend();
 	}
-	bq2589x_en_hiz_mode(g_bq, TRUE);
+	if (g_bq)
+		bq2589x_en_hiz_mode(g_bq, TRUE);
 	printk("%s\n", __func__);
 	return 0;
 }

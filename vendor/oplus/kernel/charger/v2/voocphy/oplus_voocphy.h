@@ -602,6 +602,8 @@ struct oplus_voocphy_manager {
 
 	struct oplus_mms *plc_topic;
 	struct mms_subscribe *plc_subs;
+	struct oplus_mms *comm_topic;
+	struct mms_subscribe *comm_subs;
 
 	int irq_gpio;
 	int irq;
@@ -920,6 +922,7 @@ struct oplus_voocphy_manager {
 	int batt_alarm;
 
 	int plc_status;
+	int chg_ctrl_by_sale_mode;
 };
 
 struct oplus_voocphy_operations {

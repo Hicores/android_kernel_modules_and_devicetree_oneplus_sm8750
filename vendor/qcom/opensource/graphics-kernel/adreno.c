@@ -1426,6 +1426,17 @@ int adreno_device_probe(struct platform_device *pdev,
 	if (status)
 		goto err_unbind;
 
+	//FIXME: Temp solution
+	/*
+	 * Mark KGSL device as dma coherent when io-coherency
+	 * is enabled to skip cache operations for imported dma
+	 * buffers.
+	 */
+	if (kgsl_mmu_has_feature(device, KGSL_MMU_IO_COHERENT) &&
+		(adreno_is_gen8_0_0(adreno_dev) || adreno_is_gen8_0_1(adreno_dev)) &&
+		IS_ENABLED(CONFIG_QCOM_KGSL_IOCOHERENCY_DEFAULT))
+		device->dev->dma_coherent = true;
+
 	adreno_fence_trace_array_init(device);
 
 	/* Add CX_DBGC block to the regmap*/

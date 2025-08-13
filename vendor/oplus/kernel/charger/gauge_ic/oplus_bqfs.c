@@ -229,7 +229,7 @@ static bool bqfs_fg_fw_update_cmd(struct chip_bq27541 *chip, const bqfs_cmd_t *c
 		mdelay(cmd->data.delay);
 		return true;
 	default:
-		chg_err("Unsupported command at line %d\n", cmd->line_num);
+		chg_err("Unsupported command at line\n");
 		return false;
 	}
 }
@@ -630,18 +630,12 @@ static bool oplus_bqfs_force_upgrade_counts_check(struct chip_bq27541 *chip)
 #define OPLUS_GAUGE_CP_ABNORMAL_ABS_VBAT (1000)
 #define OPLUS_GAUGE_ABNORMAL_RETRY_CNTS (3)
 #define OPLUS_GAUGE_ABNORMAL_TBATT_MAX (770)
+#define OPLUS_GAUGE_ABNORMAL_TBATT_HIGH (530)
 #define OPLUS_GAUGE_ABNORMAL_TBATT_MIN (-400)
-#define OPLUS_GAUGE_ABNORMAL_TBATT_LOW (-200)
+#define OPLUS_GAUGE_ABNORMAL_TBATT_LOW (-100)
 #define OPLUS_GAUGE_ABNORMAL_TBATT_ABS_MIN (200)
+#define OPLUS_GAUGE_ABNORMAL_TBATT_ABS_HIGH (300)
 #define OPLUS_GAUGE_ABNORMAL_TBATT_ABS_MAX (400)
-#define OPLUS_GAUGE_ABNORMAL_VBATT_MAX (4800)
-#define OPLUS_GAUGE_ABNORMAL_VBATT_MIN (2000)
-#define OPLUS_CP_ABNORMAL_FCC_MAX (5600)
-#define OPLUS_CP_ABNORMAL_FCC_MIN (2500)
-#define OPLUS_CP_ABNORMAL_SOH_MAX (100)
-#define OPLUS_CP_ABNORMAL_SOH_MIN (70)
-#define OPLUS_CP_ABNORMAL_QMAX_MAX (5600)
-#define OPLUS_CP_ABNORMAL_QMAX_MIN (3500)
 
 enum { BQFS_DATA_ERR_NONE = 0,
        BQFS_DATA_ERR_TBATT,
@@ -680,7 +674,9 @@ bool bqfs_fw_tbatt_check(struct chip_bq27541 *chip)
 		if ((((tbatt < OPLUS_GAUGE_ABNORMAL_TBATT_MIN) || (tbatt > OPLUS_GAUGE_ABNORMAL_TBATT_MAX)) &&
 			abs(tbatt - inttemp) > OPLUS_GAUGE_ABNORMAL_TBATT_ABS_MIN) ||
 			(((tbatt >= OPLUS_GAUGE_ABNORMAL_TBATT_MIN) && (tbatt <= OPLUS_GAUGE_ABNORMAL_TBATT_LOW)) &&
-			abs(tbatt - inttemp) >= OPLUS_GAUGE_ABNORMAL_TBATT_ABS_MAX))
+			abs(tbatt - inttemp) >= OPLUS_GAUGE_ABNORMAL_TBATT_ABS_MAX) ||
+			(((tbatt >= OPLUS_GAUGE_ABNORMAL_TBATT_HIGH) && (tbatt <= OPLUS_GAUGE_ABNORMAL_TBATT_MAX)) &&
+			abs(tbatt - inttemp) >= OPLUS_GAUGE_ABNORMAL_TBATT_ABS_HIGH))
 			retry_cnt++;
 		else
 			break;
@@ -711,7 +707,7 @@ bool bqfs_fw_vbatt_check(struct chip_bq27541 *chip)
 			chg_err("error reading vbatt, ret:%d\n", ret);
 			return false;
 		}
-		if ((vbatt >= OPLUS_GAUGE_ABNORMAL_VBATT_MIN) && (vbatt <= OPLUS_GAUGE_ABNORMAL_VBATT_MAX)) {
+		if ((vbatt >= chip->gauge_abnormal_vbatt_min) && (vbatt <= chip->gauge_abnormal_vbatt_max)) {
 			break;
 		}
 		retry_cnt++;
@@ -742,7 +738,7 @@ bool bqfs_fw_fcc_check(struct chip_bq27541 *chip)
 			chg_err("error reading fcc, ret:%d\n", ret);
 			return false;
 		}
-		if ((fcc >= OPLUS_CP_ABNORMAL_FCC_MIN) && (fcc <= OPLUS_CP_ABNORMAL_FCC_MAX)) {
+		if ((fcc >= chip->cp_abnormal_fcc_min) && (fcc <= chip->cp_abnormal_fcc_max)) {
 			break;
 		}
 		retry_cnt++;
@@ -773,7 +769,7 @@ bool bqfs_fw_soh_check(struct chip_bq27541 *chip)
 			chg_err("error reading soh, ret:%d\n", ret);
 			return false;
 		}
-		if ((soh > OPLUS_CP_ABNORMAL_SOH_MIN) && (soh <= OPLUS_CP_ABNORMAL_SOH_MAX)) {
+		if ((soh > chip->cp_abnormal_soh_min) && (soh <= chip->cp_abnormal_soh_max)) {
 			break;
 		}
 		retry_cnt++;
@@ -804,7 +800,7 @@ bool bqfs_fw_qmax_check(struct chip_bq27541 *chip)
 			chg_err("error reading qmax, ret:%d\n", ret);
 			return false;
 		}
-		if ((qmax >= OPLUS_CP_ABNORMAL_QMAX_MIN) && (qmax <= OPLUS_CP_ABNORMAL_QMAX_MAX)) {
+		if ((qmax >= chip->cp_abnormal_qmax_min) && (qmax <= chip->cp_abnormal_qmax_max)) {
 			break;
 		}
 		retry_cnt++;

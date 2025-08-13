@@ -7855,6 +7855,9 @@ static void mtk_charger_shutdown(struct platform_device *dev)
 	}
 
 #ifdef OPLUS_FEATURE_CHG_BASIC
+	if (oplus_is_pps_charging())
+		oplus_pps_shutdown();
+
 /* Add for shipmode stm6620 */
 	if (g_oplus_chip) {
 		enter_ship_mode_function(g_oplus_chip);

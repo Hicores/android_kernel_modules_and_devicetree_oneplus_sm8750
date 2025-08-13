@@ -246,7 +246,7 @@ static void parse_proximity_sensor_dts(struct sensor_hw* hw, struct device_node 
 		"force_cali_limit",
 		"cali_jitter_limit",
 		"cal_offset_margin",
-                "is_ps_dri",
+		"is_ps_dri",
 	};
 	rc = of_property_read_u32(ch_node, "ps-type", &value);
 
@@ -356,7 +356,8 @@ static void parse_light_sensor_dts(struct sensor_hw* hw, struct device_node *ch_
 		"k61",
 		"k62",
 		"k63",
-		"lcd_name"
+		"lcd_name",
+		"coef_f"
 	};
 	for (di = 0; di < ARRAY_SIZE(als_feature); di++) {
 		rc = of_property_read_u32(ch_node, als_feature[di], &value);
@@ -821,6 +822,48 @@ static void parse_oplus_measurement_sensor_dts(struct sensor_algorithm *algo, st
 		algo->parameter[0], algo->parameter[1]);
 }
 
+static void parse_camera_protect_sensor_dts(struct sensor_algorithm *algo, struct device_node *ch_node)
+{
+	int rc = 0;
+	int value = 0;
+	rc = of_property_read_u32(ch_node, "layout_offset_x", &value);
+	if (!rc) {
+		algo->parameter[0] = value;
+	}
+
+	rc = of_property_read_u32(ch_node, "layout_offset_y", &value);
+	if (!rc) {
+		algo->parameter[1] = value;
+	}
+
+	rc = of_property_read_u32(ch_node, "init_pin", &value);
+	if (!rc) {
+		algo->parameter[2] = value;
+	}
+
+	rc = of_property_read_u32(ch_node, "is_chip_pin", &value);
+	if (!rc) {
+		algo->parameter[3] = value;
+	}
+
+	rc = of_property_read_u32(ch_node, "sup_gyro", &value);
+	if (!rc) {
+		algo->parameter[4] = value;
+	}
+
+	rc = of_property_read_u32(ch_node, "sup_amd", &value);
+	if (!rc) {
+		algo->parameter[5] = value;
+	}
+	SENSOR_DEVINFO_DEBUG("layout_offset_x: %d, layout_offset_y: %d, init_pin: %d, is_chip_pin: %d\n",
+		algo->parameter[0], algo->parameter[1], algo->parameter[2], algo->parameter[3]);
+
+	SENSOR_DEVINFO_DEBUG("sup_gyro: %d, sup_amd: %d\n",
+		algo->parameter[4], algo->parameter[5]);
+	pr_err("sup_gyro: %d, sup_amd: %d\n",
+		algo->parameter[4], algo->parameter[5]);
+}
+
 static void parse_each_virtual_sensor_dts(struct sensor_algorithm *algo, struct device_node * ch_node)
 {
 	if (0 == strncmp(ch_node->name, "pickup", 6)) {
@@ -833,6 +876,8 @@ static void parse_each_virtual_sensor_dts(struct sensor_algorithm *algo, struct 
 		parse_mag_fusion_sensor_dts(algo, ch_node);
 	} else if (0 == strncmp(ch_node->name, "oplus_measurement", 17)) {
 		parse_oplus_measurement_sensor_dts(algo, ch_node);
+	} else if (0 == strncmp(ch_node->name, "camera_protect", 10)) {
+		parse_camera_protect_sensor_dts(algo, ch_node);
 	} else {
 		/* do nothing */
 	}

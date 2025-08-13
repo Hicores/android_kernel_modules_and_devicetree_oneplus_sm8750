@@ -102,7 +102,7 @@ static char func_name_sepolicy_reload[NAME_MAX] = "sel_write_load";
 static char func_name_socket[NAME_MAX]		= "ip_setsockopt";	/* ipv4 */
 static char func_name_socket_ip6[NAME_MAX]	= "do_ipv6_setsockopt";	/* ipv6 */
 static char func_name_cpu_info[NAME_MAX]	= "cpuinfo_open";
-static char func_name_setxattr[NAME_MAX]	= "setxattr";
+/* 6.6.56-android15-8-g38447e018c92-ab12829524-4k kernel remove setxattr*/
 
 static char func_name_execve[NAME_MAX] = "do_execveat_common";
 static char func_name_capset[NAME_MAX] = "cap_capset"; /* __arm64_sys_capset */
@@ -361,12 +361,6 @@ static int entry_handler_socket_ip6(struct kretprobe_instance *ri, struct pt_reg
 static int entry_handler_cpuinfo(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
 	oplus_heapspray_check(CPU_INFO);
-	return 0;
-}
-
-static int entry_handler_setxattr(struct kretprobe_instance *ri, struct pt_regs *regs)
-{
-	oplus_heapspray_check(SET_XATTR);
 	return 0;
 }
 
@@ -683,11 +677,6 @@ static struct kretprobe cpuinfo_kretprobe = {
 	.data_size	= sizeof(struct pt_regs),
 	.maxactive	= 300,
 };
-static struct kretprobe setxattr_kretprobe = {
-	.entry_handler  = entry_handler_setxattr,
-	.data_size	= sizeof(struct pt_regs),
-	.maxactive	= 300,
-};
 
 static int oplus_harden_init_succeed = 0;
 #if 1
@@ -853,7 +842,6 @@ int oplus_harden_init(void)
 	socket_kretprobe.kp.symbol_name = func_name_socket;
 	socket_ip6_kretprobe.kp.symbol_name = func_name_socket_ip6;
 	cpuinfo_kretprobe.kp.symbol_name = func_name_cpu_info;
-	setxattr_kretprobe.kp.symbol_name = func_name_setxattr;
 
 	do_execveat_common_kretprobe.kp.symbol_name = func_name_execve;
 	capset_kretprobe.kp.symbol_name = func_name_capset;
@@ -968,12 +956,6 @@ int oplus_harden_init(void)
 		pr_err(SG_MIX_HARDEN "%s:register func_name_cpu_info FAILED! ret %d.\n", __func__, ret);
 		goto cpuinfo_kretprobe_failed;
 	}
-
-	ret = register_kretprobe(&setxattr_kretprobe);
-	if (ret < 0) {
-		pr_err(SG_MIX_HARDEN "%s:register func_name_setxattr FAILED! ret %d.\n", __func__, ret);
-		goto setxattr_kretprobe_failed;
-	}
 #endif
 
 	pr_info(SG_MIX_HARDEN "%s:secure_harden has been register.\n", __func__);
@@ -981,8 +963,6 @@ int oplus_harden_init(void)
 	return 0;
 
 #ifdef CONFIG_OPLUS_FEATURE_SECURE_SOCKETGUARD
-setxattr_kretprobe_failed:
-	unregister_kretprobe(&cpuinfo_kretprobe);
 cpuinfo_kretprobe_failed:
 	unregister_kretprobe(&socket_ip6_kretprobe);
 socket_ip6_kretprobe_failed:
@@ -1031,7 +1011,6 @@ void oplus_harden_exit(void)
 	unregister_kretprobe(&socket_kretprobe);
 	unregister_kretprobe(&socket_ip6_kretprobe);
 	unregister_kretprobe(&cpuinfo_kretprobe);
-	unregister_kretprobe(&setxattr_kretprobe);
 #endif
 	pr_info(SG_MIX_HARDEN "%s:secure_harden has been unregister.\n", __func__);
 }

@@ -378,7 +378,7 @@ static int audio_extend_probe(struct platform_device *pdev)
 		pr_warn("%s: kzalloc for hp dac info fail!\n", __func__);
 	}
 
-	if (g_extend_pdata->spk_pa_info->config_path) {
+	if (g_extend_pdata->spk_pa_info && g_extend_pdata->spk_pa_info->config_path) {
 		audio_extend_proc_init(g_extend_pdata);
 	}
 

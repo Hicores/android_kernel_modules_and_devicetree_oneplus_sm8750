@@ -11,6 +11,7 @@
 
 #define DBUF_CACHE_DISABLE_SHRINK	0x1
 #define DBUF_CACHE_THREAD_IO_ERR	0x2
+#define DBUF_CACHE_DEFERRED_DESTROY	0x4
 
 #define AIZEROFS_PATH_MAX 512
 /*
@@ -50,6 +51,7 @@ struct aizerofs_dma_buf_cache {
 	struct page **pages;
 	struct dma_buf *dbuf;
 	struct fsnotify_mark *mark;
+	struct cred* cred;
 	char bin_path[AIZEROFS_PATH_MAX];
 	struct inode *inode, *parent_inode;
 };

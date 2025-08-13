@@ -11,6 +11,38 @@
 #include "sa_common.h"
 #include "sa_priority.h"
 
+#define UX_TYPE_NUM 5
+
+#define SA_TYPE_SWIFT_EXEC_TIME    (2 * UX_EXEC_SLICE)
+#define SA_TYPE_LIGHT_EXEC_TIME    (3 * UX_EXEC_SLICE)
+#define SA_TYPE_ANIMATOR_EXEC_TIME (12 * UX_EXEC_SLICE)
+#define SA_TYPE_HEAVY_EXEC_TIME    (25 * UX_EXEC_SLICE)
+#define SA_TYPE_LISTPICK_EXEC_TIME (30 * UX_EXEC_SLICE)
+
+/*
+  array contains {ux_type, ux_exec_time, next_effecitve_type}
+  NOTE: sa_type MUST be in ascending order of exec_time.
+*/
+static int SA_TYPE_EXEC_TIME_ASC[UX_TYPE_NUM][3] = {
+	{SA_TYPE_SWIFT, SA_TYPE_SWIFT_EXEC_TIME, (SA_TYPE_LIGHT | SA_TYPE_ANIMATOR | SA_TYPE_HEAVY | SA_TYPE_LISTPICK)},
+	{SA_TYPE_LIGHT, SA_TYPE_LIGHT_EXEC_TIME, (SA_TYPE_ANIMATOR| SA_TYPE_HEAVY | SA_TYPE_LISTPICK)},
+	{SA_TYPE_ANIMATOR, SA_TYPE_ANIMATOR_EXEC_TIME, (SA_TYPE_HEAVY | SA_TYPE_LISTPICK)},
+	{SA_TYPE_HEAVY, SA_TYPE_HEAVY_EXEC_TIME, SA_TYPE_LISTPICK},
+	{SA_TYPE_LISTPICK, SA_TYPE_LISTPICK_EXEC_TIME, 0}
+};
+
+/*
+  array contains {ux_type, ux_nice}
+  NOTE: sa_type MUST be in ascending order of nice.
+*/
+static int SA_TYPE_ORDER_BY_NICE[UX_TYPE_NUM][2] = {
+	{SA_TYPE_SWIFT, 0},
+	{SA_TYPE_ANIMATOR, 1},
+	{SA_TYPE_LIGHT, 4},
+	{SA_TYPE_HEAVY, 7},
+	{SA_TYPE_LISTPICK, 30}, /* 30 surpass priority exec gap */
+};
+
 /*
  * Nice levels are multiplicative, with a gentle 10% change for every
  * nice level changed. I.e. when a CPU-bound task goes from nice 0 to
@@ -199,15 +231,18 @@ static inline u64 avg_vruntime_exclude_curr(struct cfs_rq *cfs_rq)
 	return cfs_rq->min_vruntime + avg;
 }
 
-inline void exclude_ux_vruntime(struct sched_entity *se, int ux_state)
+inline void exclude_ux_vruntime(struct sched_entity *se)
 {
-	/* if is ux, limit its vruntime, don't push up cfs_rq->avg_vruntime in avg_vruntime_add() */
+	/* Limit UX task's vruntime, don't push up cfs_rq->avg_vruntime in avg_vruntime_add()
+	 * NOTE: If two or more UX tasks execute alternately,
+	 * each time they enter exclude_ux_vruntime, their vruntime and deadline will be slightly pushed up.
+	 * Eventually, after the UX tasks run for a long time,
+	 * the avg_vruntime of the runqueue will also be pushed up.
+	 */
 	if (likely(vruntime_before(se->vlag, se->vruntime))) {
-		if (ux_state & SA_TYPE_SWIFT) {
-			se->vruntime = max_vruntime(se->vlag, cfs_rq_of(se)->min_vruntime);
-		} else {
-			se->vruntime = max_vruntime(se->vlag, avg_vruntime_exclude_curr(cfs_rq_of(se)));
-		}
+		/* NOTE: ux_state may have changed, hard to check if is swift type here */
+		/* if swift: se->vruntime = max_vruntime(se->vlag, cfs_rq_of(se)->min_vruntime); */
+		se->vruntime = max_vruntime(se->vlag, avg_vruntime_exclude_curr(cfs_rq_of(se)));
 		se->deadline = se->vruntime + calc_delta_fair_se(se->slice, se);
 	}
 }
@@ -241,7 +276,14 @@ inline int ux_state_to_priority(int ux_state)
 	if (!(ux_state & SCHED_ASSIST_UX_MASK)) {
 		return -1;
 	}
-	prio = (uint)(ux_state & SCHED_ASSIST_UX_PRIORITY_MASK) >> SCHED_ASSIST_UX_PRIORITY_SHIFT;
+	/* swift is only for audio, always gets audio's priority */
+	if ((ux_state & SA_TYPE_SWIFT) && !(ux_state & SA_TYPE_INHERIT)) {
+		prio = UX_PRIORITY_AUDIO;
+	} else {
+		prio = ux_state & SCHED_ASSIST_UX_PRIORITY_MASK;
+	}
+
+	prio = (uint)prio >> SCHED_ASSIST_UX_PRIORITY_SHIFT;
 	DEBUG_BUG_ON(prio < 0 || prio >= PRIORITY_LEVEL_NUM);
 
 	if (prio >= PRIORITY_LEVEL_NUM) {
@@ -251,28 +293,44 @@ inline int ux_state_to_priority(int ux_state)
 	return prio;
 }
 
-inline int ux_state_to_nice(int ux_state)
+inline int ux_type_to_priority(struct oplus_task_struct *ots, int ux_type)
 {
-	int nice = 0;
-	if (!(ux_state & SCHED_ASSIST_UX_MASK)) {
-		return -1;
+	int ux_state = ots->ux_state;
+	int sub_ux_state = ots->sub_ux_state;
+	int prio = -1;
+
+	/* if ux_state has this ux_type, get its priority first */
+	if (ux_state & ux_type) {
+		if ((ux_type == SA_TYPE_SWIFT) && !(ux_state & SA_TYPE_INHERIT)) {
+			prio = UX_PRIORITY_AUDIO;
+		} else {
+			prio = ux_state & SCHED_ASSIST_UX_PRIORITY_MASK;
+		}
+	} else if (sub_ux_state & ux_type) {
+		prio = sub_ux_state & SCHED_ASSIST_UX_PRIORITY_MASK;
 	}
-	/* NOTE: could nice exec time surpass priority exec gap? */
-	if (ux_state & SA_TYPE_SWIFT) {
-		nice = 0;
-	} else if (ux_state & SA_TYPE_ANIMATOR) {
-		nice = 1;
-	} else if (ux_state & SA_TYPE_LIGHT) {
-		nice = 4;
-	} else if (ux_state & SA_TYPE_HEAVY) {
-		nice = 7;
-	} else if (ux_state & SA_TYPE_LISTPICK) {
-		/* surpass priority exec gap */
-		nice = 30;
-	} else {
-		DEBUG_BUG_ON(1);
+
+	prio = (uint)prio >> SCHED_ASSIST_UX_PRIORITY_SHIFT;
+	DEBUG_BUG_ON(prio < 0 || prio >= PRIORITY_LEVEL_NUM);
+	if (prio >= PRIORITY_LEVEL_NUM) {
+		prio = PRIORITY_LEVEL_NUM - 1;
 	}
-	return nice;
+
+	return prio;
+}
+
+int ux_type_to_nice(int type)
+{
+	if (type & SCHED_ASSIST_UX_MASK) {
+		/* the higher priority ux take effect first */
+		for (int i = 0; i < UX_TYPE_NUM; i++) {
+			if (type & SA_TYPE_ORDER_BY_NICE[i][0]) {
+				return SA_TYPE_ORDER_BY_NICE[i][1];
+			}
+		}
+	}
+
+	return -1;
 }
 
 u64 prio_nice_to_vruntime(int ux_priority, int ux_nice)
@@ -292,6 +350,7 @@ void initial_prio_nice_and_vruntime(struct oplus_rq *orq, struct oplus_task_stru
 
 	ots->ux_priority = ux_prio;
 	ots->ux_nice = ux_nice;
+
 #ifdef ENABLE_PRESET_VRUNTIME
 	preset_vruntime = prio_nice_to_vruntime(ux_prio, ux_nice);
 	if (orq->nr_running > 0) {
@@ -368,15 +427,20 @@ void insert_task_to_ux_timeline(struct oplus_task_struct *ots, struct oplus_rq *
 	orq->load_weight += ux_prio_to_weight[ots->ux_priority];
 }
 
-void update_ux_timeline_task_change(struct oplus_rq *orq, struct oplus_task_struct *ots, int new_prio, int new_nice)
+bool update_ux_vruntime(struct oplus_rq *orq, struct oplus_task_struct *ots, int new_prio, int new_nice)
 {
 	int old_prio = ots->ux_priority;
 	int old_nice = ots->ux_nice;
 #ifdef ENABLE_PRESET_VRUNTIME
+	s64 preset_vrt_delta;
 	u64 old_preset_vrt;
+	u64 exec_vruntime;
 #endif
 	lockdep_assert_held(orq->ux_list_lock);
 
+	if (old_prio == new_prio && old_nice == new_nice) {
+		return false;
+	}
 	orq->load_weight = orq->load_weight - ux_prio_to_weight[old_prio] + ux_prio_to_weight[new_prio];
 	DEBUG_BUG_ON((orq->nr_running < 0) || ((s64)orq->load_weight < 0));
 	DEBUG_BUG_ON((orq->nr_running == 0) && (orq->load_weight != 0));
@@ -386,18 +450,34 @@ void update_ux_timeline_task_change(struct oplus_rq *orq, struct oplus_task_stru
 	ots->ux_priority = new_prio;
 	ots->ux_nice = new_nice;
 
-
 #ifdef ENABLE_PRESET_VRUNTIME
 	old_preset_vrt = ots->preset_vruntime;
-	ots->preset_vruntime = old_preset_vrt - prio_nice_to_vruntime(old_prio, old_nice) + prio_nice_to_vruntime(new_prio, new_nice);
-	ots->vruntime = ots->vruntime - old_preset_vrt + ots->preset_vruntime;
+	preset_vrt_delta = prio_nice_to_vruntime(new_prio, new_nice) - prio_nice_to_vruntime(old_prio, old_nice);
+	/* adjust preset vruntime for new priority and new nice */
+	ots->preset_vruntime = old_preset_vrt + preset_vrt_delta;
+	if (preset_vrt_delta > 0) {
+		/* try to keep vruntime unaltered, don't get punitive vruntime when turn to a lower prio from a higher one */
+		exec_vruntime = ots->vruntime - old_preset_vrt - preset_vrt_delta;
+		exec_vruntime = max_vruntime(orq->min_vruntime, exec_vruntime);
+		ots->vruntime = ots->preset_vruntime + exec_vruntime;
+	} else {
+		ots->vruntime += preset_vrt_delta;
+	}
 #endif
 	DEBUG_BUG_ON((s64)(ots->preset_vruntime) < 0);
 	DEBUG_BUG_ON((s64)(ots->vruntime) < 0);
+	return true;
+}
 
-	/* rebalance vruntime timeline */
-	rb_erase_cached(&ots->ux_entry, &orq->ux_list);
-	rb_add_cached(&ots->ux_entry, &orq->ux_list, __entity_less);
+void update_ux_timeline_task_change(struct oplus_rq *orq, struct oplus_task_struct *ots, int new_prio, int new_nice)
+{
+	bool updated = update_ux_vruntime(orq, ots, new_prio, new_nice);
+
+	if (updated) {
+		/* rebalance vruntime timeline */
+		rb_erase_cached(&ots->ux_entry, &orq->ux_list);
+		rb_add_cached(&ots->ux_entry, &orq->ux_list, __entity_less);
+	}
 }
 
 void update_ux_timeline_task_tick(struct oplus_rq *orq, struct oplus_task_struct *ots) {
@@ -447,7 +527,8 @@ void update_ux_timeline_task_tick(struct oplus_rq *orq, struct oplus_task_struct
 	}
 }
 
-void update_ux_timeline_task_removal(struct oplus_rq *orq, struct oplus_task_struct *ots) {
+void update_ux_timeline_task_removal(struct oplus_rq *orq, struct oplus_task_struct *ots, __maybe_unused struct sched_entity *se, __maybe_unused bool is_curr)
+{
 	bool need_update_min_vrt;
 
 	lockdep_assert_held(orq->ux_list_lock);
@@ -473,10 +554,7 @@ void update_ux_timeline_task_removal(struct oplus_rq *orq, struct oplus_task_str
 		orq->min_vruntime = 0;
 		DEBUG_BUG_ON(NULL != ux_list_first_entry(&orq->ux_list));
 		DEBUG_BUG_ON(NULL != exec_timeline_first_entry(&orq->exec_timeline));
-		return;
-	}
-
-	if (need_update_min_vrt) {
+	} else if (need_update_min_vrt) {
 		/* NOTE: ots->vruntime may move backwards if the priority of task becomes higher.
 		* And its exec_vruntime (ots->vruntime - ots->preset_vruntime) keeps forewards while keeps running.
 		* When switch to next task, next task's exec_vruntime may begin at zero again.
@@ -490,6 +568,12 @@ void update_ux_timeline_task_removal(struct oplus_rq *orq, struct oplus_task_str
 		DEBUG_BUG_ON((s64)(exec_vruntime) < 0);
 		orq->min_vruntime = max_vruntime(orq->min_vruntime, exec_vruntime);
 	}
+
+#ifdef OPLUS_UX_EEVDF_COMPATIBLE
+	if (is_curr) {
+		exclude_ux_vruntime(se);
+	}
+#endif
 }
 
 bool need_resched_ux(struct oplus_rq *orq, struct oplus_task_struct *curr, unsigned long delta_exec)
@@ -544,12 +628,83 @@ bool need_wakeup_preempt(struct oplus_rq *orq, struct oplus_task_struct *curr)
 	return (vdiff > ux_wakeup_gran_vtime);
 }
 
+inline int ux_max_exec_time(int types)
+{
+	/* get the maximum exe time among in types */
+	for (int i = UX_TYPE_NUM - 1; i >= 0; i--) {
+		if (types & SA_TYPE_EXEC_TIME_ASC[i][0]) {
+			return SA_TYPE_EXEC_TIME_ASC[i][1];
+		}
+	}
+	return 0;
+}
+
+inline int next_effective_ux_type(int types)
+{
+	if (types & SCHED_ASSIST_UX_MASK) {
+		/* the higher priority ux take effect first */
+		for (int i = 0; i < UX_TYPE_NUM; i++) {
+			if (types & SA_TYPE_ORDER_BY_NICE[i][0]) {
+				return SA_TYPE_ORDER_BY_NICE[i][0];
+			}
+		}
+	}
+
+	return 0;
+}
+
+
+/**
+ * @brief get next available sa types for exec time
+ *
+ * @param pre_exec_time previous exec time
+ * @param exec_time current exec time
+ * @param next_types available sa types
+ * @return bool if type switched
+ */
+inline bool next_effective_ux_types(u64 pre_exec_time, u64 exec_time, int *next_types)
+{
+	for (int i = UX_TYPE_NUM - 1; i >= 0; i--) {
+		if (exec_time >= SA_TYPE_EXEC_TIME_ASC[i][1]) {
+			*next_types = SA_TYPE_EXEC_TIME_ASC[i][2];
+			return (pre_exec_time < SA_TYPE_EXEC_TIME_ASC[i][1]);
+		}
+	}
+
+	*next_types = SCHED_ASSIST_UX_MASK;
+	return false;
+}
+
+bool pick_next_ux_exec(struct oplus_task_struct *ots, u64 pre_exec_time, int *next_type)
+{
+	int ux_types;
+	int ux_type;
+	int effective_types;
+
+	bool ux_type_switched = next_effective_ux_types(pre_exec_time, ots->total_exec, &ux_types);
+	/* if ux_state exist, get type from it first */
+	effective_types = ux_types & ots->ux_state;
+	ux_type = next_effective_ux_type(effective_types);
+
+	if (!ux_type) {
+		/* get sub_ux_state's ux_type socondly */
+		effective_types = ux_types & ots->sub_ux_state;
+		ux_type = next_effective_ux_type(effective_types);
+	}
+
+	*next_type = ux_type;
+	return ux_type_switched;
+}
+
 void android_vh_sched_stat_runtime_handler(void *unused, struct task_struct *task, u64 delta_exec, u64 vruntime)
 {
 	struct rq *rq;
 	struct oplus_rq *orq;
 	struct oplus_task_struct *ots;
 	unsigned long irqflag;
+#ifdef OPLUS_UX_EEVDF_COMPATIBLE
+	unsigned long sum_delta_exec;
+#endif
 
 	rq = task_rq(task);
 	orq = (struct oplus_rq *)rq->android_oem_data1;
@@ -561,35 +716,55 @@ void android_vh_sched_stat_runtime_handler(void *unused, struct task_struct *tas
 	spin_lock_irqsave(orq->ux_list_lock, irqflag);
 	smp_mb__after_spinlock();
 	if (!oplus_rbnode_empty(&ots->ux_entry)) {
-		unsigned int limit;
-		#ifdef OPLUS_UX_EEVDF_COMPATIBLE
-		unsigned long sum_delta_exec;
+		u64 pre_exec_time;
+		int next_ux_type = 0;
 		struct sched_entity *se = &task->se;
-		#endif
 
+		pre_exec_time = ots->total_exec;
 		ots->total_exec += delta_exec;
 		ots->vruntime += calc_delta_fair(delta_exec, ots->ux_priority);
-		limit = ux_task_exec_limit(task);
-		if (ots->total_exec >= limit) {
-			update_ux_timeline_task_removal(orq, ots);
-			put_task_struct(task);
-			#ifdef OPLUS_UX_EEVDF_COMPATIBLE
-			exclude_ux_vruntime(se, ots->ux_state);
-			/* skip eevdf preempt in update_deadline for ux task, check if should reschedule */
-			resched_curr(rq);
-			#endif
-		} else {
-			/* rebalance ux timeline after task's vruntime changed */
-			update_ux_timeline_task_tick(orq, ots);
-			#ifdef OPLUS_UX_EEVDF_COMPATIBLE
-			/* delta_exec is a small piece in update_curr in eevdf, use sum_delta_exec instead */
-			sum_delta_exec = se->sum_exec_runtime - se->prev_sum_exec_runtime;
-			/* skip eevdf preempt in update_deadline for ux task, check if should reschedule */
-			if (need_resched_ux(orq, ots, sum_delta_exec)) {
-				resched_curr(rq);
+
+		if (is_multiple_ux(ots)) {
+			bool switched = pick_next_ux_exec(ots, pre_exec_time, &next_ux_type);
+			if (switched && next_ux_type) {
+				int ux_prio, ux_nice;
+				ux_prio = ux_type_to_priority(ots, next_ux_type);
+				ux_nice = ux_type_to_nice(next_ux_type);
+
+				/* during running, ux's priotity is monotone decreasing  */
+				DEBUG_BUG_ON(ux_prio > ots->ux_priority);
+				/* if ux_state is sa_light and sub_ux_state is sa_animator, ux nice descrease when switched */
+				DEBUG_BUG_ON((ux_nice < ots->ux_nice) && (next_ux_type != SA_TYPE_ANIMATOR));
+				update_ux_vruntime(orq, ots, ux_prio, ux_nice);
 			}
-			#endif
 		}
+
+		if (!next_ux_type) {
+			unsigned int limit;
+			limit = ux_task_exec_limit(task);
+			if (ots->total_exec >= limit) {
+				update_ux_timeline_task_removal(orq, ots, se, true);
+				put_task_struct(task);
+#ifdef OPLUS_UX_EEVDF_COMPATIBLE
+				/* skip eevdf preempt in update_deadline for ux task, check if should reschedule */
+				resched_curr(rq);
+#endif
+				goto out;
+			}
+		}
+
+		/* rebalance ux timeline after task's vruntime changed */
+		update_ux_timeline_task_tick(orq, ots);
+#ifdef OPLUS_UX_EEVDF_COMPATIBLE
+		/* delta_exec is a small piece in update_curr in eevdf, use sum_delta_exec instead */
+		sum_delta_exec = se->sum_exec_runtime - se->prev_sum_exec_runtime;
+		/* skip eevdf preempt in update_deadline for ux task, check if should reschedule */
+		if (need_resched_ux(orq, ots, sum_delta_exec)) {
+			resched_curr(rq);
+		}
+#endif
 	}
+
+out:
 	spin_unlock_irqrestore(orq->ux_list_lock, irqflag);
 }

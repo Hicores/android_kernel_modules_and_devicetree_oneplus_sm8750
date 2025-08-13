@@ -1261,6 +1261,10 @@
 		Bit6: sending extend cmd while panel power on accroding to current pwm mode
 		Bit7: sending extend cmd while timing switch accroding to current pwm pulse level
 		Bit8: sending extend cmd after sending dbv threshold cmd in another thread
+		...
+		Bit24:support pwm mode0
+		Bit25:support pwm mode1
+		Bit26:support pwm mode2
 	*/
 	oplus,pwm-switch-config = <0x0>;
 	/*	oplus,pwm-switch-mode0-states-info/oplus,pwm-switch-mode1-states-info:
@@ -1271,11 +1275,11 @@
 	*/
 	//oplus,pwm-switch-mode0-states-info = <0>;
 	//oplus,pwm-switch-mode1-states-info = <0>;
-	/*	oplus,pwm-cmd-switch-map:
+	/*	oplus,pwm-mode1-cmd-switch-map/oplus,pwm-mode2-cmd-switch-map;
 		Specific cmd replace relationship while in switch on(1pulse) mode. It is a string array that
 		compose with cmd names, every 2 names combine 1 map. For example, map "'a', 'b'" means replace
 		a to b while sending a in switch on mode.
 	*/
-	//oplus,pwm-cmd-switch-map = "qcom,mdss-dsi-timing-switch-command", "qcom,mdss-dsi-timming-pwm-switch-onepulse-command";
+	//oplus,pwm-mode2-cmd-switch-map = "qcom,mdss-dsi-timing-switch-command", "qcom,mdss-dsi-timming-pwm-switch-onepulse-command";
 
 };

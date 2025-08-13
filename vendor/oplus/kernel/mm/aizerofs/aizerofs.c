@@ -29,6 +29,7 @@ struct aizerofs_drop_cache_data {
 #define AIZEROFS_IOCTL_BIN_TO_DMA_BUF 0
 #define AIZEROFS_IOCTL_GET_PARAM_IDX 1
 #define AIZEROFS_IOCTL_DROP_CACHES _IOWR('a', 2, struct aizerofs_drop_cache_data)
+#define AIZEROFS_IOCTL_SET_SCENE 3
 
 struct aizerofs_to_dma_buf {
 	int dma_buf_fd;
@@ -49,6 +50,7 @@ struct aizerofs_io {
 	unsigned long len;
 	unsigned long comp_len;
 	struct bio_vec bvec[BATCH_IO];
+	struct cred* cred;
 };
 
 typedef struct file *(*filp_open_t)(const char *filename, int flags, umode_t mode);
@@ -83,7 +85,6 @@ retry:
 		}
 
 		init_sync_kiocb(&kiocb, io->filp);
-		kiocb.ki_flags |= IOCB_NOWAIT;
 		kiocb.ki_pos = io->pos + len;
 		iov_iter_bvec(&iter, ITER_DEST, bvec, BATCH_IO, BATCH_SIZE);
 		ret = io->filp->f_op->read_iter(&kiocb, &iter);
@@ -106,8 +107,22 @@ retry:
 static int aizerofs_io_task(void *data)
 {
 	struct aizerofs_io *io = (struct aizerofs_io *)data;
+	int ret;
+	const struct cred *old_cred;
+	bool is_overlay_fs = is_overlayfs(io->filp);
+	if(is_overlay_fs) {
+		if (!io->cred) {
+			pr_err("aizerofs_io_task cred is NULL\n");
+			return -EACCES;
+		}
 
-	return aizerofs_do_batch_io(io);
+		old_cred = override_creds(io->cred);
+	}
+
+	ret = aizerofs_do_batch_io(io);
+	if(is_overlay_fs)
+		revert_creds(old_cred);
+	return ret;
 }
 
 static int aizerofs_open(struct inode *inode, struct file *file)
@@ -143,6 +158,8 @@ static long aizerofs_ioctl(struct file *filp, unsigned int cmd, unsigned long ar
 			return aizerofs_handle_get_param_idx(arg);
 		case AIZEROFS_IOCTL_DROP_CACHES:
 			return aizerofs_handle_drop_caches(arg);
+		case AIZEROFS_IOCTL_SET_SCENE:
+			return aizerofs_set_scene(arg);
 		default:
 			return -EINVAL;
 	}
@@ -253,8 +270,12 @@ static long aizerofs_ioctl(struct file *filp, unsigned int cmd, unsigned long ar
 				io[i].len = len / AIIO_THREADS;
 				io[i].comp_len = 0;
 				io[i].pos = pos + i * len / AIIO_THREADS;
+				if (io[i].cred)
+					put_cred(io[i].cred);
+				io[i].cred = prepare_kernel_cred(current);
 				tasks[i] = kthread_create(aizerofs_io_task, &io[i], "aizerofs_io/%d", i);
 				if (IS_ERR(tasks[i])) {
+					put_cred(io[i].cred);
 					pr_err("%s failed to create io thread%d\n", __func__, i);
 					break;
 				}
@@ -314,7 +335,6 @@ io_retry:
 			}
 			init_sync_kiocb(&kiocb, bin_file);
 			kiocb.ki_pos = pos;
-			kiocb.ki_flags |= IOCB_NOWAIT;
 			iov_iter_bvec(&iter, ITER_DEST, bvec, npages, npages * PAGE_SIZE);
 			ret = bin_file->f_op->read_iter(&kiocb, &iter);
 			if (ret < 0 && ret != -EAGAIN) {
@@ -388,7 +408,7 @@ static inline int run_trim(char cmd, char *path, unsigned long nr_pages)
 {
 	struct aizerofs_dma_buf_cache *target_cache;
 
-	if (!path[0]){
+	if (!path[0]) {
 		target_cache = NULL;
 	} else {
 		target_cache = find_dmabuf_cache_by_path(path, false);

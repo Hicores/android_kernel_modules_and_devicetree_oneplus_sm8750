@@ -1498,6 +1498,8 @@ int kern_lstat_init(void)
 {
 	int ret;
 
+	fatal_collect_init();
+
 	REGISTER_HOOKS_HANDLE_RET(register_trace_android_vh_futex_wait_start,
 				android_vh_futex_wait_start_handler, NULL, err);
 	REGISTER_HOOKS_HANDLE_RET(register_trace_android_vh_futex_wait_end,
@@ -1514,7 +1516,6 @@ int kern_lstat_init(void)
 				android_vh_rwsem_write_wait_start_handler, NULL, err6);
 	REGISTER_HOOKS_HANDLE_RET(register_trace_android_vh_rwsem_write_wait_finish,
 				android_vh_rwsem_write_wait_finish_handler, NULL, err7);
-	fatal_collect_init();
 
 	ret = create_stats_procs();
 	if (ret < 0)

@@ -2318,8 +2318,12 @@
 		Bit6: sending extend cmd while panel power on accroding to current pwm mode
 		Bit7: sending extend cmd while timing switch accroding to current pwm pulse level
 		Bit8: sending extend cmd after sending dbv threshold cmd in another thread
+		...
+		Bit24:support pwm mode0
+		Bit25:support pwm mode1
+		Bit26:support pwm mode2
 	*/
-	oplus,pwm-switch-config = <0x87>;
+	oplus,pwm-switch-config = <0x03000087>;
 	/*	oplus,pwm-switch-mode0-states-info/oplus,pwm-switch-mode1-states-info:
 		Specific dbv threshold and pulse info of 2 pwm mode, for pulse, 0 symbols 1pulse,
 		1symbols 3pulse and 2 symbols 18pulse. The format should be 1 dbv threshold info with

@@ -7,6 +7,8 @@ OPLUS_SUN_BOARDS += erhai-24926-sun-overlay.dtbo\
                     erhai-24976-sun-overlay-DVT.dtbo\
                     erhai-24976-eu-sun-overlay.dtbo\
                     erhai-24976-eu-sun-overlay-DVT.dtbo\
+                    erhai-24974-sun-overlay.dtbo\
+                    erhai-24974-eu-sun-overlay.dtbo\
 
 
 dtb-y += $(OPLUS_SUN_BOARDS) $(SUN_BASE_DTB)

@@ -27,6 +27,7 @@ enum err_topic_item {
 	ERR_ITEM_CLOSE_CP,
 	ERR_ITEM_BIDIRECT_CP_INFO,
 	ERR_ITEM_PLC_INFO,
+	ERR_ITEM_PPS,
 };
 
 enum oplus_chg_track_mcu_voocphy_break_code {

@@ -432,19 +432,21 @@ static void oplus_plc_protocol_record_exit(struct oplus_plc_protocol *opp)
 		opp->record.exit_temp = data.intval;
 	}
 
-	chip->track_info.index += snprintf(
-		&(chip->track_info.msg[chip->track_info.index]),
-		PLC_INFO_LEN - chip->track_info.index,
-		"$$protocol_%d@@%s$$time_%d@@%lu"
-		"$$start_soc_%d@@%d,$$exit_soc_%d@@%d"
-		"$$start_sm_soc_%d@@%d,$$exit_sm_soc_%d@@%d"
-		"$$start_ui_soc_%d@@%d,$$exit_ui_soc_%d@@%d"
-		"$$start_temp_%d@@%d,$$exit_temp_%d@@%d",
-		chip->track_count, get_protocol_name_str(opp->record.cp_type), chip->track_count, time,
-		chip->track_count, opp->record.start_soc, chip->track_count, opp->record.exit_soc,
-		chip->track_count, opp->record.start_sm_soc, chip->track_count, opp->record.exit_sm_soc,
-		chip->track_count, opp->record.start_ui_soc, chip->track_count, opp->record.exit_ui_soc,
-		chip->track_count, opp->record.start_temp, chip->track_count, opp->record.exit_temp);
+	if (chip->track_info.index < PLC_INFO_LEN) {
+		chip->track_info.index += scnprintf(
+			&(chip->track_info.msg[chip->track_info.index]),
+			PLC_INFO_LEN - chip->track_info.index,
+			"$$protocol_%d@@%s$$time_%d@@%lu"
+			"$$start_soc_%d@@%d,$$exit_soc_%d@@%d"
+			"$$start_sm_soc_%d@@%d,$$exit_sm_soc_%d@@%d"
+			"$$start_ui_soc_%d@@%d,$$exit_ui_soc_%d@@%d"
+			"$$start_temp_%d@@%d,$$exit_temp_%d@@%d",
+			chip->track_count, get_protocol_name_str(opp->record.cp_type), chip->track_count, time,
+			chip->track_count, opp->record.start_soc, chip->track_count, opp->record.exit_soc,
+			chip->track_count, opp->record.start_sm_soc, chip->track_count, opp->record.exit_sm_soc,
+			chip->track_count, opp->record.start_ui_soc, chip->track_count, opp->record.exit_ui_soc,
+			chip->track_count, opp->record.start_temp, chip->track_count, opp->record.exit_temp);
+	}
 	chip->track_count++;
 }
 
@@ -457,11 +459,11 @@ static void oplus_plc_protocol_disable(struct oplus_chg_plc *chip)
 	if (!opp)
 		return;
 	chg_info("%s: disable\n", opp->desc->name);
-	opp->enable = false;
 	rc = oplus_plc_strategy_exit(opp->strategy);
 	if (rc < 0)
 		chg_err("%s: strategy exit error, rc=%d\n",
 			opp->desc->name, rc);
+	opp->enable = false;
 	opp->desc->ops.disable(opp);
 	oplus_plc_protocol_record_exit(opp);
 }
@@ -725,7 +727,7 @@ static void step_strategy_track_work(struct work_struct *work)
 	}
 
 	if (step->info.index < PLC_INFO_LEN) {
-		step->info.index += snprintf(&(step->info.msg[step->info.index]),
+		step->info.index += scnprintf(&(step->info.msg[step->info.index]),
 			PLC_INFO_LEN - step->info.index, "$$enable_cnts@@%d$$exit_soc@@%d"
 			"$$exit_sm_soc@@%d$$exit_ui_soc@@%d$$exit_temp@@%d$$exit_vbat@@%d$$exit_ibat@@%d",
 			chip->enable_cnts, soc_now, chip->sm_soc, chip->ui_soc, batt_temp, vbat_min_mv, ibat_ma);
@@ -782,7 +784,7 @@ static void step_strategy_get_deleta_track_msg(struct oplus_plc_strategy_step *s
 	chg_info("[%d, %d, %d][%d, %d, %d, %d, %d, %d, %d, %d]\n", type, step->data.init_sm_soc, step->data.init_ui_soc,
 		chip->sm_soc, soc_now, vbat_min_mv, batt_temp, ibat_ma, step->data.avg_ibus, step->data.avg_ibat, curr_vote);
 	if (step->info.index < PLC_INFO_LEN)
-		step->info.index += snprintf(&(step->info.msg[step->info.index]),
+		step->info.index += scnprintf(&(step->info.msg[step->info.index]),
 		PLC_INFO_LEN - step->info.index, "$$exit_type@@%d$$smooth_soc_%d@@%d$$soc_now_%d@@%d$$vbat_%d@@%d"
 		"$$tbat_%d@@%d$$ibat_%d@@%d$$avg_ibus_%d@@%d$$avg_ibat_%d@@%d$$curr_vote_%d@@%d",
 		type, chip->sm_soc, type, soc_now, type, vbat_min_mv, type, batt_temp, type, ibat_ma, type,
@@ -832,7 +834,7 @@ static void step_strategy_init_status(struct oplus_plc_strategy_step *step)
 	chg_info("[%d, %d]\n", step->data.init_sm_soc, step->data.init_ui_soc);
 
 	if (step->info.index < PLC_INFO_LEN)
-		step->info.index += snprintf(&(step->info.msg[step->info.index]),
+		step->info.index += scnprintf(&(step->info.msg[step->info.index]),
 			PLC_INFO_LEN - step->info.index, "$$plc_buck@@%d$$init_sm_soc@@%d"
 			"$$init_ui_soc@@%d$$init_soc@@%d$$vbat_min@@%d$$tbat@@%d$$ibat_ma@@%d",
 			chip->plc_buck, step->data.init_sm_soc, step->data.init_ui_soc,
@@ -1147,7 +1149,7 @@ static ssize_t simple_strategy_ibus_proc_read(struct file *file, char __user *bu
 	char buf[PROC_DATA_BUF_SIZE] = { 0 };
 	int len = 0;
 
-	len += snprintf(buf, sizeof(buf) - 1, "%d,%d\n",
+	len += scnprintf(buf, sizeof(buf) - 1, "%d,%d\n",
 			simple->curr_ma[STRATEGY_CURR_DEFAULT],
 			simple->curr_ma[STRATEGY_CURR_HIGH]);
 	if (len > *off)
@@ -1385,7 +1387,7 @@ static ssize_t strategy_type_proc_read(struct file *file, char __user *buff, siz
 	char buf[PROC_DATA_BUF_SIZE] = { 0 };
 	int len = 0;
 
-	len += snprintf(buf, sizeof(buf) - 1, "%s\n",
+	len += scnprintf(buf, sizeof(buf) - 1, "%s\n",
 			oplus_plc_strategy_type_str(strategy->desc->type));
 	if (len > *off)
 		len -= *off;
@@ -1427,7 +1429,7 @@ static ssize_t strategy_name_proc_read(struct file *file, char __user *buff, siz
 			break;
 		}
 	}
-	len += snprintf(buf, sizeof(buf) - 1, "%s\n", name);
+	len += scnprintf(buf, sizeof(buf) - 1, "%s\n", name);
 	if (len > *off)
 		len -= *off;
 	else
@@ -1692,14 +1694,12 @@ static void oplus_plc_chg_mode_change_work(struct work_struct *work)
 	enum oplus_plc_chg_mode chg_mode;
 	int rc;
 
-	mutex_lock(&chip->status_control_lock);
 	rc = oplus_mms_get_item_data(chip->plc_topic, PLC_ITEM_CHG_MODE,
 		&data, false);
 	if (rc < 0) {
 		chg_err("cannot get PLC_ITEM_CHG_MODE data, rc=%d\n", rc);
 		rc = oplus_plc_protocol_get_chg_mode(chip);
 		if (rc < 0) {
-			mutex_unlock(&chip->status_control_lock);
 			chg_err("cannot get chg mode, rc=%d\n", rc);
 			return;
 		}
@@ -1724,7 +1724,6 @@ static void oplus_plc_chg_mode_change_work(struct work_struct *work)
 		if (rc < 0)
 			chg_err("unsuspend charger error, rc=%d\n", rc);
 	}
-	mutex_unlock(&chip->status_control_lock);
 }
 
 static void oplus_plc_plc_subs_callback(struct mms_subscribe *subs,
@@ -1834,6 +1833,8 @@ static void oplus_plc_wired_online_work(struct work_struct *work)
 
 	if (chip->wired_online && chip->plc_status != PLC_STATUS_ENABLE) {
 		mutex_lock(&chip->status_control_lock);
+		vote(chip->output_suspend_votable, PLC_VOTER, false, 0, false);
+		vote(chip->wired_suspend_votable, PLC_VOTER, false, 0, false);
 		if (!oplus_plc_protocol_support(chip))
 			oplus_plc_set_status(chip, PLC_STATUS_NOT_ALLOW);
 		else
@@ -1846,6 +1847,8 @@ static void oplus_plc_wired_online_work(struct work_struct *work)
 		} else {
 			mutex_lock(&chip->status_control_lock);
 			oplus_plc_set_status(chip, PLC_STATUS_NOT_ALLOW);
+			vote(chip->output_suspend_votable, PLC_VOTER, false, 0, false);
+			vote(chip->wired_suspend_votable, PLC_VOTER, false, 0, false);
 			mutex_unlock(&chip->status_control_lock);
 		}
 	}
@@ -2235,11 +2238,11 @@ static ssize_t current_protocol_proc_read(struct file *file, char __user *buff, 
 		opp = chip->buck_opp;
 
 	if (opp != NULL)
-		len += snprintf(buf, sizeof(buf) - 1, "%s[%s]\n",
+		len += scnprintf(buf, sizeof(buf) - 1, "%s[%s]\n",
 				get_protocol_name_str(chip->cpa_current_type),
 				opp->desc->name);
 	else
-		len += snprintf(buf, sizeof(buf) - 1, "NULL\n");
+		len += scnprintf(buf, sizeof(buf) - 1, "NULL\n");
 
 	if (len > *off)
 		len -= *off;
@@ -2406,17 +2409,17 @@ static ssize_t opp_current_strategy_proc_read(struct file *file, char __user *bu
 	int len = 0;
 
 	if (opp->strategy == NULL) {
-		len += snprintf(buf, sizeof(buf) - 1, "NULL[NULL]\n");
+		len += scnprintf(buf, sizeof(buf) - 1, "NULL[NULL]\n");
 	} else {
 		for (i = 0; i < opp->strategy_num; i++) {
 			if (opp->strategy_groups[i].strategy == opp->strategy)
 				name = opp->strategy_groups[i].name;
 		}
 		if (opp->strategy->node != NULL)
-			len += snprintf(buf, sizeof(buf) - 1, "%s[%s]\n",
+			len += scnprintf(buf, sizeof(buf) - 1, "%s[%s]\n",
 					name, opp->strategy->node->name);
 		else
-			len += snprintf(buf, sizeof(buf) - 1, "%s[NULL]\n", name);
+			len += scnprintf(buf, sizeof(buf) - 1, "%s[NULL]\n", name);
 	}
 	if (len > *off)
 		len -= *off;

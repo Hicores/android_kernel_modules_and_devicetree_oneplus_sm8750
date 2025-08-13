@@ -304,7 +304,7 @@ struct oplus_chg_vooc {
 	int subboard_ntc_abnormal_cool_down;
 	int subboard_ntc_abnormal_current;
 
-	bool chg_ctrl_by_sale_mode;
+	int chg_ctrl_by_sale_mode;
 	bool slow_chg_enable;
 	int slow_chg_pct;
 	int slow_chg_watt;
@@ -2597,7 +2597,12 @@ static int oplus_vooc_fastchg_process(struct oplus_chg_vooc *chip)
 	oplus_vooc_check_temp_range(chip, chip->temperature);
 
 	if (chip->cool_down > 0) {
-		if (chip->chg_ctrl_by_sale_mode)
+		if (chip->chg_ctrl_by_sale_mode == SALE_MODE_COOL_DOWN_THREE)
+			ret_info =
+				oplus_vooc_get_min_curr_level(chip, ret_info, SALE_MODE_COOL_DOWN_THREE_VAL,
+						      chip->sid,
+						      config->data_width == 7);
+		else if (chip->chg_ctrl_by_sale_mode)
 			ret_info =
 				oplus_vooc_get_min_curr_level(chip, ret_info, SALE_MODE_COOL_DOWN_VAL,
 						      chip->sid,
@@ -3981,6 +3986,8 @@ static void oplus_abnormal_adapter_check_work(struct work_struct *work)
 
 	if (chip->wired_present == (!!data.intval))
 		return;
+	/* do not add any code here */
+	WRITE_ONCE(chip->wired_present, !!data.intval);
 
 	if (chip->cpa_current_type != CHG_PROTOCOL_VOOC && chip->retention_state) {
 		chg_info("clear_abnormal_adapter_dis_cnt\n");
@@ -3993,7 +4000,6 @@ static void oplus_abnormal_adapter_check_work(struct work_struct *work)
 		mmi_chg = !get_client_vote(chip->common_chg_suspend_votable,
 					   MMI_CHG_VOTER);
 
-	WRITE_ONCE(chip->wired_present, !!data.intval);
 	if (!chip->wired_present) {
 		chip->svooc_detach_time = local_clock() / 1000000;
 		/*pm8550bhs cid gpio9 pull out  by 50ms cycle pulse detect,when adapter pull out need to wait 50ms*/
@@ -4098,7 +4104,7 @@ static void oplus_vooc_comm_subs_callback(struct mms_subscribe *subs,
 		case COMM_ITEM_SALE_MODE:
 			oplus_mms_get_item_data(chip->comm_topic, id, &data,
 						false);
-			chip->chg_ctrl_by_sale_mode = (bool)data.intval;
+			chip->chg_ctrl_by_sale_mode = data.intval;
 			break;
 		default:
 			break;
@@ -4144,7 +4150,7 @@ static void oplus_vooc_subscribe_comm_topic(struct oplus_mms *topic,
 	chip->temperature = data.intval;
 	oplus_mms_get_item_data(chip->comm_topic, COMM_ITEM_SALE_MODE, &data,
 				true);
-	chip->chg_ctrl_by_sale_mode = (bool)data.intval;
+	chip->chg_ctrl_by_sale_mode = data.intval;
 	rc = oplus_mms_get_item_data(chip->comm_topic,
 				     COMM_ITEM_CHARGING_DISABLE, &data, true);
 	if (rc < 0) {

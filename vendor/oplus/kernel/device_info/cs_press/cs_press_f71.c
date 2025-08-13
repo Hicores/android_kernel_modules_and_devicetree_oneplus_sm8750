@@ -18,6 +18,9 @@
  */
 
 #include "cs_press_f71.h"
+#include <linux/sched.h>
+#include <linux/sched/signal.h>
+#include <uapi/linux/sched/types.h>
 
 //#define ALIENTEK
 #ifndef ALIENTEK
@@ -26,7 +29,7 @@
 #endif
 const char *cs_driver_ver = "1.13";
 
-#define PROC_FOPS_NUM  28
+#define PROC_FOPS_NUM  29
 #define PROC_NAME_LEN  32
 
 #ifndef ALIENTEK
@@ -1069,7 +1072,9 @@ void report_camera_key(void)
         } else if (!(rbuf[1] & BIT_ACTION_LIFT_PHYSICAL_DOWN)
                 && !(rbuf[0] & BIT_ACTION_PHYSICAL_TOUCHING)
                 && g_cs_press.is_physical_tap_down) {
-            LOG_INFO("[REPORT_KEY]KEY_PHYSICAL_TAP up(ignore)\n");
+            LOG_INFO("[REPORT_KEY]KEY_PHYSICAL_TAP up at DELAY_EVENT_MODE\n");
+            input_report_key(cs_input_dev, KEY_PHYSICAL_TAP, 0);
+            input_sync(cs_input_dev);
             g_cs_press.is_physical_tap_down = false;
         }
         /* Tap Event */
@@ -1187,6 +1192,10 @@ void fml_key_report(void)
 */
 static int cs_press_event_handler(void *unused)
 {
+    struct sched_param param = {.sched_priority = SCHEDULE_CS_PRESS_PRIORITY};
+
+    sched_setscheduler(current, SCHED_FIFO, &param);
+
     do {
         wait_event_interruptible(cs_press_waiter,
             cs_press_int_flag != 0);
@@ -1924,6 +1933,9 @@ int fml_firmware_send_data(unsigned char *data, int len)
         oplus_kevent_fb(PSW_BSP_KEYPAD, CS_PRESS_FB_FW_UPDATE_TYPE, payload);
 #endif
         g_cs_press.fw_update_error = result;
+        g_cs_press.is_update_log = 1;
+    } else {
+        g_cs_press.is_update_log = 0;
     }
 exit_fw_buf:
     msleep(100);
@@ -3106,6 +3118,7 @@ int cs_press_init(void)
     int ret = 0;
     char i;
     unsigned char boot_ver_buf[4];
+
     LOG_DEBUG("cs driver ver %s\n", cs_driver_ver);
     for(i = 0; i < 3; i++){
         if(cs_read_boot_version(boot_ver_buf) >= 0){
@@ -3122,6 +3135,7 @@ int cs_press_init(void)
     if(i >= 3)
     {
         LOG_ERR("chipid err return\n");
+        g_cs_press.is_update_log = 1;
         return -1;
     }
     /* reset ic */
@@ -5165,6 +5179,34 @@ exit_flag:
     return count;
 }
 
+static ssize_t cs_proc_probe_status_write(struct file *file, const char __user *buf,
+		size_t count, loff_t *offset)
+{
+    char kbuf[5] = { 0 };
+    int tmp = 0;
+
+    if (!buf) {
+        LOG_ERR("buff is null!\n");
+        return count;
+    }
+    if((count <= 0)||(count > 4)){
+        LOG_ERR("argument err\n");
+        return count;
+    }
+
+    if (copy_from_user(kbuf, buf, count)) {
+        return count;
+    }
+    if (kstrtoint(kbuf, 10, &tmp)) {
+        LOG_ERR("%s: kstrtoint error\n", __func__);
+        return count;
+    }
+    g_cs_press.is_update_log = !! tmp;
+    LOG_ERR("is_update_log is %d\n", g_cs_press.is_update_log);
+
+    return count;
+}
+
 static int cs_read_left_press_gear_show(struct seq_file *m, void *v)
 {
     char ret = 0;
@@ -5475,6 +5517,13 @@ static int cs_proc_health_monitor_show(struct seq_file *m, void *v)
     return 0;
 }
 
+static int cs_proc_probe_status_show(struct seq_file *m, void *v)
+{
+    char ret = 0;
+    seq_printf(m, "%d", g_cs_press.is_update_log);
+    return ret;
+}
+
 static int cs_proc_read_boot_version_open(struct inode *inode, struct file *filp)
 {
     return single_open(filp,cs_read_boot_version_show,NULL);
@@ -5548,6 +5597,11 @@ static int cs_proc_quick_on_close_open(struct inode *inode, struct file *filp)
 static int cs_proc_health_monitor_open(struct inode *inode, struct file *filp)
 {
     return single_open(filp, cs_proc_health_monitor_show, pde_data(inode));
+}
+
+static int cs_proc_probe_status_open(struct inode *inode, struct file *filp)
+{
+    return single_open(filp, cs_proc_probe_status_show, pde_data(inode));
 }
 
 static int cs_proc_show(struct seq_file *m,void *v)
@@ -5707,6 +5761,7 @@ static const char proc_list[PROC_FOPS_NUM][PROC_NAME_LEN]={
     "gpio_control",
     "local_fw_info",
     "health_info",
+    "probe_status",
 };
 
 #ifndef ALIENTEK
@@ -5744,6 +5799,7 @@ static const struct file_operations proc_fops[PROC_FOPS_NUM] = {
     FOPS_ARRAY(cs_proc_open, cs_proc_gpio_control_write),
     FOPS_ARRAY(cs_proc_local_fw_info_open, NULL),    /*local_fw_info*/
     FOPS_ARRAY(cs_proc_health_monitor_open, cs_proc_health_monitor_write),
+    FOPS_ARRAY(cs_proc_probe_status_open, cs_proc_probe_status_write),
 };
 /**
   * @brief  cs_sys_create
@@ -6184,6 +6240,7 @@ static int csa37f71_probe(struct i2c_client *client)
         pinctrl_select_state(g_cs_press.pinctrl, g_cs_press.irq_pin_input);
     }
 
+    g_cs_press.is_update_log = 0;
     cs_procfs_create();                 /*proc node*/
 #ifdef INT_SET_EN
     eint_init();
