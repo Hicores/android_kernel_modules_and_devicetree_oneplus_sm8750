@@ -112,6 +112,11 @@ def _get_make_goals_deprecation_warning(ctx):
     )
     return msg
 
+def _get_kconfig_werror_setup(ctx):
+    if not ctx.attr._kconfig_werror[BuildSettingInfo].value:
+        return ""
+    return "export KCONFIG_WERROR=1"
+
 def _kernel_env_impl(ctx):
     srcs = [
         s
@@ -198,6 +203,8 @@ def _kernel_env_impl(ctx):
     make_goals = _get_make_goals(ctx)
     make_goals_deprecation_warning = _get_make_goals_deprecation_warning(ctx)
 
+    kconfig_werror_setup = _get_kconfig_werror_setup(ctx)
+
     if ctx.attr._rust_tools:
         rustc = utils.find_file("rustc", ctx.files._rust_tools, "rust tools", required = True)
         bindgen = utils.find_file("bindgen", ctx.files._rust_tools, "rust tools", required = True)
@@ -222,6 +229,11 @@ def _kernel_env_impl(ctx):
     else:
         bin_dir_and_workspace_root = ctx.bin_dir.path
 
+    if ctx.file.clang_autofdo_profile:
+        set_clang_autofdo_profile_cmd = "export CLANG_AUTOFDO_PROFILE=${ROOT_DIR}/" + ctx.file.clang_autofdo_profile.path
+    else:
+        set_clang_autofdo_profile_cmd = ""
+
     command += """
         # create a build environment
           source {build_utils_sh}
@@ -231,8 +243,11 @@ def _kernel_env_impl(ctx):
           {check_arch_cmd}
         # Variables from resolved toolchain
           {toolchains_setup_env_var_cmd}
+          {set_clang_autofdo_profile_cmd}
         # TODO(b/236012223) Remove the warning after deprecation.
           {make_goals_deprecation_warning}
+        # Enforce check configs.
+          {kconfig_werror_setup}
         # Identify the build user as 'kleaf' to recognize a kleaf-built kernel
           export KBUILD_BUILD_USER=kleaf
         # Add a comment with config_tags for debugging
@@ -274,7 +289,9 @@ def _kernel_env_impl(ctx):
         setup_env = setup_env.path,
         check_arch_cmd = _get_check_arch_cmd(ctx),
         toolchains_setup_env_var_cmd = toolchains.setup_env_var_cmd,
+        set_clang_autofdo_profile_cmd = set_clang_autofdo_profile_cmd,
         make_goals_deprecation_warning = make_goals_deprecation_warning,
+        kconfig_werror_setup = kconfig_werror_setup,
         out = out_file.path,
         config_tags_comment_file = config_tags_out.env.path,
         pre_env_script = pre_env_script.path,
@@ -316,6 +333,8 @@ def _kernel_env_impl(ctx):
     ]
     if kconfig_ext:
         setup_inputs.append(kconfig_ext)
+    if ctx.file.clang_autofdo_profile:
+        setup_inputs.append(ctx.file.clang_autofdo_profile)
     setup_inputs += dtstree_srcs
 
     run_env = _get_run_env(ctx, srcs, toolchains)
@@ -364,7 +383,6 @@ def _get_env_setup_cmds(ctx):
         pre_env += debug.trap()
 
     kleaf_repo_workspace_root = Label(":kernel_env.bzl").workspace_root
-    kleaf_repo_workspace_root_slash = (kleaf_repo_workspace_root + "/") if kleaf_repo_workspace_root else ""
 
     pre_env += """
         # KLEAF_REPO_WORKSPACE_ROOT: workspace_root of the Kleaf repository. See Label.workspace_root.
@@ -423,8 +441,27 @@ def _get_env_setup_cmds(ctx):
         fi
 
         # Redeclare KERNEL_DIR to be under $KLEAF_REPO_WORKSPACE_ROOT.
-        if [ -n "${{KLEAF_REPO_WORKSPACE_ROOT}}" ]; then
-            export KERNEL_DIR=${{KLEAF_REPO_WORKSPACE_ROOT:+$KLEAF_REPO_WORKSPACE_ROOT/}}${{KERNEL_DIR#{kleaf_repo_workspace_root_slash}}}
+        # Only do that if all of the following is true:
+        #   - We are setting up the variables for a kernel_filegroup with prebuilt scripts
+        #     (KLEAF_FIX_KERNEL_DIR == 1)
+        #   - The kernel_build() that originally built these prebuilts was declared at the
+        #     root Bazel module in its workspace (we may relax this requirement in the future if
+        #     there's a use case)
+        # A typical use case for this is that KERNEL_DIR=common in prebuilt scripts, but if @kleaf
+        #    is a dependent module and common/ is below @kleaf, then kernel_filegroup need to fix
+        #    the value so that KERNEL_DIR=external/kleaf~/common.
+        if [ "${{KLEAF_FIX_KERNEL_DIR}}" = 1 ]; then
+
+            if [ -n "{kernel_build_workspace_root}" ]; then
+                echo "ERROR: The original kernel_build() that built these prebuilts was " >&2
+                echo "    {kernel_build_label}" >&2
+                echo "  It is currently not supported to use these prebuilts within a kernel_filegroup." >&2
+                echo "  Instead, the kernel_build() should have been built at the root Bazel module." >&2
+                echo "  Please contact the provider for these prebuilts to resolve this error." >&2
+                exit 1
+            fi
+
+            export KERNEL_DIR=${{KLEAF_REPO_WORKSPACE_ROOT:+$KLEAF_REPO_WORKSPACE_ROOT/}}${{KERNEL_DIR}}
         fi
 
         ## Set up KCPPFLAGS and KCPPFLAGS_COMPAT
@@ -458,8 +495,10 @@ def _get_env_setup_cmds(ctx):
         get_make_jobs_cmd = status.get_volatile_status_cmd(ctx, "MAKE_JOBS"),
         get_make_keep_going_cmd = status.get_volatile_status_cmd(ctx, "MAKE_KEEP_GOING"),
         linux_x86_libs_path = ctx.files._linux_x86_libs[0].dirname,
-        kleaf_repo_workspace_root_slash = kleaf_repo_workspace_root_slash,
+        kernel_build_workspace_root = ctx.label.workspace_root,
+        kernel_build_label = str(ctx.label).removesuffix("_env"),
     )
+
     return struct(
         pre_env = pre_env,
         post_env = post_env,
@@ -627,6 +666,7 @@ kernel_env = rule(
             values = ["true", "false", "auto"],
         ),
         "make_goals": attr.string_list(doc = "`MAKE_GOALS`"),
+        "clang_autofdo_profile": attr.label(allow_single_file = True),
         "_rust_tools": attr.label_list(default = _get_rust_tools, allow_files = True),
         "_build_utils_sh": attr.label(
             allow_single_file = True,

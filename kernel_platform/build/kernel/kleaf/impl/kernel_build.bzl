@@ -31,6 +31,8 @@ load(":btf.bzl", "btf")
 load(":cache_dir.bzl", "cache_dir")
 load(
     ":common_providers.bzl",
+    "CompileCommandsInfo",
+    "CompileCommandsSingleInfo",
     "GcovInfo",
     "KernelBuildAbiInfo",
     "KernelBuildExtModuleInfo",
@@ -59,6 +61,7 @@ load(
 load(":debug.bzl", "debug")
 load(":file.bzl", "file")
 load(":file_selector.bzl", "file_selector")
+load(":gcov_utils.bzl", "gcov_attrs", "get_grab_gcno_step")
 load(":hermetic_toolchain.bzl", "hermetic_toolchain")
 load(":kernel_config.bzl", "kernel_config")
 load(":kernel_config_settings.bzl", "kernel_config_settings")
@@ -119,6 +122,7 @@ def kernel_build(
         pack_module_env = None,
         sanitizers = None,
         ddk_module_defconfig_fragments = None,
+        clang_autofdo_profile = None,
         **kwargs):
     """Defines a kernel build target with all dependent targets.
 
@@ -434,6 +438,11 @@ def kernel_build(
           in `ddk_module`s building against this kernel.
           Unlike `defconfig_fragments`, `ddk_module_defconfig_fragments` is not applied
           to this `kernel_build` target, nor dependent legacy `kernel_module`s.
+        clang_autofdo_profile: Path to an AutoFDO profile,
+          For example:
+          ```
+            clang_autofdo_profile = "//toolchain/pgo-profiles/kernel:aarch64/android15-6.6/kernel.afdo"
+          ```
         **kwargs: Additional attributes to the internal rule, e.g.
           [`visibility`](https://docs.bazel.build/versions/main/visibility.html).
           See complete list
@@ -538,6 +547,7 @@ def kernel_build(
         target_platform = name + "_platform_target",
         exec_platform = name + "_platform_exec",
         defconfig_fragments = defconfig_fragments,
+        clang_autofdo_profile = clang_autofdo_profile,
         **internal_kwargs
     )
 
@@ -601,7 +611,7 @@ def kernel_build(
         name = name,
         config = config_target_name,
         keep_module_symvers = keep_module_symvers,
-        srcs = srcs,
+        srcs = srcs + all_kmi_symbol_lists,
         outs = kernel_utils.transform_kernel_build_outs(name, "outs", outs),
         module_outs = kernel_utils.transform_kernel_build_outs(name, "module_outs", module_outs),
         implicit_outs = kernel_utils.transform_kernel_build_outs(name, "implicit_outs", implicit_outs),
@@ -1193,78 +1203,6 @@ def _get_grab_symtypes_step(ctx):
         outputs = outputs,
     )
 
-def get_grab_gcno_step(ctx, src_dir, is_kernel_build):
-    """Returns a step for grabbing the `*.gcno`files from `src_dir`.
-
-    Args:
-        ctx: Context from the rule.
-        src_dir: Source directory.
-        is_kernel_build: The flag to indicate whether the rule is `kernel_build`.
-
-    Returns:
-      A struct with fields (inputs, tools, outputs, cmd, gcno_mapping, gcno_dir)
-    """
-    grab_gcno_cmd = ""
-    inputs = []
-    outputs = []
-    tools = []
-    gcno_mapping = None
-    gcno_dir = None
-    if ctx.attr._gcov[BuildSettingInfo].value or ctx.attr._kocov[BuildSettingInfo].value:
-        gcno_dir = ctx.actions.declare_directory("{name}/{name}_gcno".format(name = ctx.label.name))
-        gcno_mapping = ctx.actions.declare_file("{name}/gcno_mapping.{name}.json".format(name = ctx.label.name))
-        gcno_archive = ctx.actions.declare_file(
-            "{name}/{name}.gcno.tar.gz".format(name = ctx.label.name),
-        )
-        outputs += [gcno_dir, gcno_mapping, gcno_archive]
-        tools.append(ctx.executable._print_gcno_mapping)
-
-        extra_args = ""
-        base_kernel = ""
-        if is_kernel_build == True:
-            base_kernel = base_kernel_utils.get_base_kernel(ctx)
-        base_kernel_gcno_dir_cmd = ""
-        if base_kernel and base_kernel[GcovInfo].gcno_mapping:
-            extra_args = "--base {}".format(base_kernel[GcovInfo].gcno_mapping.path)
-            inputs.append(base_kernel[GcovInfo].gcno_mapping)
-            if base_kernel[GcovInfo].gcno_dir:
-                inputs.append(base_kernel[GcovInfo].gcno_dir)
-                base_kernel_gcno_dir_cmd = """
-                    # Copy all *.gcno files and its subdirectories recursively.
-                    rsync -a -L --prune-empty-dirs --include '*/' --include '*.gcno' --exclude '*' {base_gcno_dir}/ {gcno_dir}/
-                """.format(
-                    base_gcno_dir = base_kernel[GcovInfo].gcno_dir.path,
-                    gcno_dir = gcno_dir.path,
-                )
-
-        # Note: Emitting `src_dir` is one source of ir-reproducible output for sandbox actions.
-        # However, note that these ir-reproducibility are tied to vmlinux, because these paths are already
-        # embedded in vmlinux. This file just makes such ir-reproducibility more explicit.
-        grab_gcno_cmd = """
-            rsync -a --prune-empty-dirs --include '*/' --include '*.gcno' --exclude '*' {src_dir}/ {gcno_dir}/
-            {print_gcno_mapping} {extra_args} {src_dir}:{gcno_dir} > {gcno_mapping}
-            # Archive gcno_dir + gcno_mapping + base_kernel_gcno_dir
-            {base_kernel_gcno_cmd}
-            cp {gcno_mapping} {gcno_dir}
-            tar czf {gcno_archive} -C {gcno_dir} .
-        """.format(
-            src_dir = src_dir,
-            gcno_dir = gcno_dir.path,
-            gcno_mapping = gcno_mapping.path,
-            print_gcno_mapping = ctx.executable._print_gcno_mapping.path,
-            extra_args = extra_args,
-            gcno_archive = gcno_archive.path,
-            base_kernel_gcno_cmd = base_kernel_gcno_dir_cmd,
-        )
-    return struct(
-        inputs = inputs,
-        tools = tools,
-        cmd = grab_gcno_cmd,
-        outputs = outputs,
-        gcno_mapping = gcno_mapping,
-        gcno_dir = gcno_dir,
-    )
-
 def _get_grab_kbuild_output_step(ctx):
     """Returns a step for grabbing the `*`files from `OUT_DIR`.
 
@@ -1395,7 +1333,18 @@ def _get_modinst_step(ctx, modules_staging_dir):
          # Set variables and create dirs for modules
            mkdir -p {modules_staging_dir}
          # Install modules
-           if grep -q "\\bmodules\\b" <<< "{make_goals}" ; then
+           if grep -q -E -e "\\bmodules\\b|[.]ko\\b" <<< "{make_goals}" ; then
+               if grep -q -E -e "[.]ko\\b" <<< "{make_goals}" ; then
+                   # For single_module builds, we need to generate our own
+                   # modules.order since `make` deletes it, but it's needed for
+                   # `modules_install`. We don't really care about the module
+                   # ordering here. With fw_devlink enabled in GKI, the probe
+                   # ordering should be handled based on device dependencies.
+                   : > ${{OUT_DIR}}/modules.order
+                   for module in {make_goals}; do
+                       echo ${{module}} | sed -n "s:\\([.]\\)ko\\>.*:\\1o:p"  >> ${{OUT_DIR}}/modules.order
+                   done
+               fi
                make -C ${{KERNEL_DIR}} ${{TOOL_ARGS}} DEPMOD=true O=${{OUT_DIR}} {module_strip_flag} INSTALL_MOD_PATH=$(realpath {modules_staging_dir}) modules_install
            else
                # Workaround as this file is required, hence just produce a placeholder.
@@ -1405,7 +1354,7 @@ def _get_modinst_step(ctx, modules_staging_dir):
         modules_staging_dir = modules_staging_dir,
         internal_outs_under_out_dir = " ".join(["${{OUT_DIR}}/{}".format(item) for item in _kernel_build_internal_outs]),
         module_strip_flag = module_strip_flag,
-        make_goals = ctx.attr.config[KernelEnvMakeGoalsInfo].make_goals,
+        make_goals = " ".join(ctx.attr.config[KernelEnvMakeGoalsInfo].make_goals),
     )
 
     if base_kernel:
@@ -1488,9 +1437,9 @@ def _build_main_action(
         all_module_basenames_file = all_module_basenames_file,
     )
     grab_symtypes_step = _get_grab_symtypes_step(ctx)
-    grab_gcno_step = get_grab_gcno_step(ctx, "${OUT_DIR}", is_kernel_build = True)
+    grab_gcno_step = get_grab_gcno_step(ctx, "${COMMON_OUT_DIR}", is_kernel_build = True)
     grab_cmd_step = get_grab_cmd_step(ctx, "${OUT_DIR}")
-    compile_commands_step = compile_commands_utils.kernel_build_step(ctx)
+    compile_commands_step = compile_commands_utils.get_step(ctx, "${OUT_DIR}")
     grab_gdb_scripts_step = kgdb.get_grab_gdb_scripts_step(ctx)
     grab_kbuild_output_step = _get_grab_kbuild_output_step(ctx)
     copy_module_symvers_step = _get_copy_module_symvers_step(ctx)
@@ -1526,7 +1475,35 @@ def _build_main_action(
     command += """
            {kbuild_mixed_tree_cmd}
          # Actual kernel build
-           {interceptor_command_prefix} make -C ${{KERNEL_DIR}} ${{TOOL_ARGS}} O=${{OUT_DIR}} {make_goals}
+           if grep -q "\\bdtbs\\b" <<< "{make_goals}" ; then
+               # TODO(b/359683179): if we build dtbs with the individual kernel
+               # modules, then not all of the kernel modules are found in the
+               # OUT_DIR. Building dtbs first, fixes this issue.
+               {interceptor_command_prefix} make -C ${{KERNEL_DIR}} ${{TOOL_ARGS}} O=${{OUT_DIR}} dtbs
+           fi
+           make_subgoals=$(echo "{make_goals}" | sed "s:\\<dtbs\\>::" || true)
+           # Allow an empty/unspecified make_goals attribute to trigger just
+           # "make" in the kernel directory to build the default target.
+           #
+           # We check against the blank/whitespace character class to account
+           # for the case where the make_goals attribute isn't set, in which case
+           # we default to MAKE_GOALS, and MAKE_GOALS is defined as just
+           # whitespace--for example:
+           #
+           # MAKE_GOALS="
+           # "
+           #
+           # This aligns with the expectation of an empty/unspecified make_goals
+           # attribute building the default target.
+           if [[ -n "${{make_subgoals}}" ]] || [[ "{make_goals}" =~ ^[[:space:]]*$ ]]; then
+               if grep -q -E -e "[.]ko\\b" <<< "${{make_subgoals}}" ; then
+                   # TODO(b/359681021) Follow up with the upstream maintainer to
+                   # see what needs to be done to drop KBUILD_MODPOST_WARN=1.
+                   {interceptor_command_prefix} make -C ${{KERNEL_DIR}} ${{TOOL_ARGS}} O=${{OUT_DIR}} KBUILD_MODPOST_WARN=1 ${{make_subgoals}}
+               else
+                   {interceptor_command_prefix} make -C ${{KERNEL_DIR}} ${{TOOL_ARGS}} O=${{OUT_DIR}} ${{make_subgoals}}
+               fi
+           fi
          # Install modules
            {modinst_cmd}
          # Archive headers in OUT_DIR
@@ -1625,6 +1602,12 @@ def _build_main_action(
     for step in steps:
         command_outputs += step.outputs
 
+    if ctx.file.src_protected_exports_list:
+        inputs.append(ctx.file.src_protected_exports_list)
+
+    if ctx.file.src_protected_modules_list:
+        inputs.append(ctx.file.src_protected_modules_list)
+
     debug.print_scripts(ctx, command)
     ctx.actions.run_shell(
         mnemonic = "KernelBuild",
@@ -1645,7 +1628,7 @@ def _build_main_action(
         ruledir = ruledir,
         cmd_dir = grab_cmd_step.cmd_dir,
         compile_commands_with_vars = compile_commands_step.compile_commands_with_vars,
-        compile_commands_out_dir = compile_commands_step.compile_commands_out_dir,
+        compile_commands_common_out_dir = compile_commands_step.compile_commands_common_out_dir,
         gcno_outputs = grab_gcno_step.outputs,
         gcno_mapping = grab_gcno_step.gcno_mapping,
         gcno_dir = grab_gcno_step.gcno_dir,
@@ -1800,8 +1783,6 @@ def _create_infos(
         outs = depset(all_output_files["outs"].values()),
         base_kernel_files = kbuild_mixed_tree_ret.base_kernel_files,
         interceptor_output = main_action_ret.interceptor_output,
-        compile_commands_with_vars = main_action_ret.compile_commands_with_vars,
-        compile_commands_out_dir = main_action_ret.compile_commands_out_dir,
     )
 
     kernel_build_uname_info = KernelBuildUnameInfo(
@@ -1819,8 +1800,25 @@ def _create_infos(
             for dep in ext_mod_serialized_env_info_deps
         },
         fake_system_map = True,
-        extra_restore_outputs_cmd = "",
-        extra_inputs = depset(transitive = [module_srcs.module_scripts]),
+        extra_restore_outputs_cmd = """
+            (
+                {kbuild_mixed_tree_cmd}
+              # Stitch together the GKI symbols and device module symbols
+              # together for proper linking during the modpost step. This will
+              # also help detect CRC differences between the GKI and device
+              # builds if the same symbol is defined twice with different CRC
+              # values.
+                if [[ -f "${{KBUILD_MIXED_TREE}}/Module.symvers" ]]; then
+                  cp ${{KBUILD_MIXED_TREE}}/Module.symvers ${{OUT_DIR}}/Module.symvers.tmp
+                  grep -v -e "\\bvmlinux\\b" ${{OUT_DIR}}/Module.symvers >> ${{OUT_DIR}}/Module.symvers.tmp
+                  cat ${{OUT_DIR}}/Module.symvers.tmp | sort -u > ${{OUT_DIR}}/Module.symvers
+                  rm -f ${{OUT_DIR}}/Module.symvers.tmp
+                fi
+            )
+        """.format(
+            kbuild_mixed_tree_cmd = kbuild_mixed_tree_ret.cmd,
+        ),
+        extra_inputs = depset(kbuild_mixed_tree_ret.outputs, transitive = [module_srcs.module_scripts]),
     )
 
     # External modules do not need implicit_outs because they are unsigned.
@@ -1937,6 +1935,7 @@ def _create_infos(
     output_group_info = OutputGroupInfo(**output_group_kwargs)
 
     kbuild_mixed_tree_files = all_output_files["outs"].values() + all_output_files["module_outs"].values()
+    kbuild_mixed_tree_files.append(all_output_files["internal_outs"]["Module.symvers"])
     kbuild_mixed_tree_info = KernelBuildMixedTreeInfo(
         files = depset(kbuild_mixed_tree_files),
     )
@@ -1944,6 +1943,13 @@ def _create_infos(
     cmds_info = KernelCmdsInfo(
         srcs = depset([target.files for target in ctx.attr.srcs]),
         directories = depset([main_action_ret.cmd_dir]),
+    )
+
+    compile_commands_info = CompileCommandsInfo(
+        infos = depset([CompileCommandsSingleInfo(
+            compile_commands_with_vars = main_action_ret.compile_commands_with_vars,
+            compile_commands_common_out_dir = main_action_ret.compile_commands_common_out_dir,
+        )]),
     )
 
     modules_prepare_archive = utils.find_file(
@@ -1974,6 +1980,7 @@ def _create_infos(
         ruledir = main_action_ret.ruledir,
         module_env_archive = module_scripts_archive,
         has_base_kernel = base_kernel_utils.get_base_kernel(ctx) != None,
+        copy_module_symvers_outputs = main_action_ret.module_symvers_outputs,
     )
 
     default_info_files = all_output_files["outs"].values() + all_output_files["module_outs"].values()
@@ -2004,6 +2011,7 @@ def _create_infos(
         images_info,
         gcov_info,
         filegroup_decl_info,
+        compile_commands_info,
         ctx.attr.config[KernelEnvAttrInfo],
         ctx.attr.config[KernelToolchainInfo],
         output_group_info,
@@ -2108,11 +2116,6 @@ _kernel_build = rule(
             executable = True,
             doc = "label referring to the script to process outputs",
         ),
-        "_print_gcno_mapping": attr.label(
-            default = Label("//build/kernel/kleaf/impl:print_gcno_mapping"),
-            cfg = "exec",
-            executable = True,
-        ),
         "deps": attr.label_list(
             allow_files = True,
         ),
@@ -2171,7 +2174,7 @@ _kernel_build = rule(
             allow_files = True,
         ),
         "arch": attr.string(),
-    } | _kernel_build_additional_attrs(),
+    } | _kernel_build_additional_attrs() | gcov_attrs(),
     toolchains = [hermetic_toolchain.type],
 )
 

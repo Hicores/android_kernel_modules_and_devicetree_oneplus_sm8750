@@ -928,10 +928,6 @@
 		qcom,batt_bq28z610;
 		oplus,batt_num = <2>;
 		qcom,gauge_num = <0>;
-		oplus,bq28z610_afi_buf = /bits/ 8 <
-			/* checksum data_len data+ */
-			0xf7 0x04 0xf4 0x46 0xce 0x00 /* Charge Term Taper Current 206mA */
-			>;
 
 		oplus,ic_type = <OPLUS_CHG_IC_GAUGE>;
 		oplus,ic_index = <0>;

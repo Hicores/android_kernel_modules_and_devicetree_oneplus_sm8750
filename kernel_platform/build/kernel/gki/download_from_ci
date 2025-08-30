@@ -622,7 +622,7 @@ def get_build_info(targets):
       return data
     except json.decoder.JSONDecodeError:
       pass
-  raise json.decoder.JSONDecodeError("URL data did not contain BUILD_INFO.")
+  raise Exception("None of the targets contain BUILD_INFO")
 
 def update_gki():
   # The 'kernel_riscv64' target is on a separate branch that does not include
@@ -762,11 +762,12 @@ def update_microdroid_kernel():
   short_branch = branch.removeprefix("aosp_kernel-common-")
   output_dir = os.environ["ANDROID_BUILD_TOP"]
   base_dir = os.path.join(output_dir, "packages", "modules", "Virtualization",
-                          "microdroid", "kernel", short_branch)
+                          "guest", "kernel", short_branch)
 
-  for arch in "arm64", "x86_64":
-    arch_suffix = "aarch64" if arch == "arm64" else arch
-    directory = os.path.join(base_dir, arch)
+  for arch in "arm64", "arm64_16k", "x86_64":
+    arch_suffix = arch.replace("arm64", "aarch64")
+    sub_dirs = ["arm64", "16k"] if arch == "arm64_16k" else [arch]
+    directory = os.path.join(base_dir, *sub_dirs)
     os.makedirs(directory, exist_ok=True)
     kernel = os.path.join(directory, "kernel-" + version)
     old_version, old_sha = None, None

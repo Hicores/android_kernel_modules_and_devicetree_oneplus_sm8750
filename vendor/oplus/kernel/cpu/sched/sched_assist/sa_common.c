@@ -73,6 +73,11 @@
 #define inherit_ux_offset_of(type)			(type * INHERIT_UX_SEC_WIDTH)
 #define inherit_ux_mask_of(type)			((u64)(INHERIT_UX_MASK_BASE) << (inherit_ux_offset_of(type)))
 
+#ifdef CONFIG_HMBIRD_SCHED
+#include <linux/sched/hmbird.h>
+#include <linux/sched/hmbird_version.h>
+#endif
+
 #define inherit_ux_get_bits(value, type)	((value & inherit_ux_mask_of(type)) >> inherit_ux_offset_of(type))
 #define inherit_ux_value(type, value)		((u64)value << inherit_ux_offset_of(type))
 
@@ -135,6 +140,14 @@ void register_sched_assist_locking_ops(struct sched_assist_locking_ops *ops)
 		pr_warn("sched_assist_locking_ops has already been registered!\n");
 }
 EXPORT_SYMBOL_GPL(register_sched_assist_locking_ops);
+#endif
+
+#ifdef CONFIG_HMBIRD_SCHED
+bool task_is_hmbird(struct task_struct *p)
+{
+	struct hmbird_entity *ts = get_hmbird_ts(p);
+	return p->sched_class == ts->sched_class;
+}
 #endif
 
 #define TOPAPP 4
@@ -292,11 +305,11 @@ static void build_oplus_cpu_array(void)
 
 void update_ux_sched_cputopo(void)
 {
-	unsigned long prev_cap = 0;
 	unsigned long cpu_cap = 0;
 	unsigned int cpu = 0;
 	int i = 0, insert_idx = 0, cls_nr = 0;
 	struct ux_sched_cluster sched_cls;
+	int cls_id = -1, prev_cls_id = -1;
 
 	/* reset prev cpu topo info */
 	sched_init_ux_cputopo();
@@ -304,10 +317,12 @@ void update_ux_sched_cputopo(void)
 	/* update new cpu topo info */
 	for_each_possible_cpu(cpu) {
 		cpu_cap = arch_scale_cpu_capacity(cpu);
-		/* add cpu with same capacity into target sched_cls */
-		if (cpu_cap == prev_cap) {
+		cls_id = topology_cluster_id(cpu);
+
+		/* add cpu with same cls_id into target sched_cls, mtk can update capacity in mtk_update_cpu_capacity */
+		if (cls_id == prev_cls_id) {
 			for (i = 0; i < ux_sched_cputopo.cls_nr; ++i) {
-				if (cpu_cap == ux_sched_cputopo.sched_cls[i].capacity) {
+				if (cls_id == i) {
 					cpumask_set_cpu(cpu, &ux_sched_cputopo.sched_cls[i].cpus);
 					break;
 				}
@@ -325,7 +340,7 @@ void update_ux_sched_cputopo(void)
 			ux_sched_cputopo.sched_cls[cls_nr] = sched_cls;
 		} else {
 			for (i = 0; i <= ux_sched_cputopo.cls_nr; ++i) {
-				if (sched_cls.capacity < ux_sched_cputopo.sched_cls[i].capacity) {
+				if (cls_id < i || ux_sched_cputopo.sched_cls[i].capacity == ULONG_MAX) {
 					insert_idx = i;
 					break;
 				}
@@ -341,8 +356,9 @@ void update_ux_sched_cputopo(void)
 		}
 		ux_sched_cputopo.cls_nr++;
 
-		prev_cap = cpu_cap;
+		prev_cls_id = cls_id;
 	}
+
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_LOADBALANCE)
 	build_oplus_cpu_array();
 #endif
@@ -569,7 +585,7 @@ noinline int tracing_mark_write(const char *buf)
 	return 0;
 }
 
-static int is_vip_mvp(struct task_struct *p)
+int is_vip_mvp(struct task_struct *p)
 {
 	struct oplus_task_struct *ots = get_oplus_task_struct(p);
 	if (IS_ERR_OR_NULL(ots))
@@ -827,11 +843,12 @@ static inline bool oplus_is_min_capacity_cpu(int cpu)
 {
 	struct ux_sched_cputopo ux_cputopo = ux_sched_cputopo;
 	int cls_nr = ux_cputopo.cls_nr - 1;
+	int cls_id = topology_cluster_id(cpu);
 
 	if (unlikely(cls_nr <= 0))
 		return false;
 
-	return capacity_orig_of(cpu) <= ux_cputopo.sched_cls[0].capacity;
+	return cls_id <= 0;
 }
 
 bool oplus_task_misfit(struct task_struct *tsk, int cpu)
@@ -846,6 +863,12 @@ inline bool test_task_is_fair(struct task_struct *task)
 {
 	DEBUG_BUG_ON(!task);
 
+#ifdef CONFIG_HMBIRD_SCHED
+	if(HMBIRD_OGKI_VERSION == get_hmbird_version_type()) {
+		if (task_is_hmbird(task))
+			return false;
+	}
+#endif
 	/* valid CFS priority is MAX_RT_PRIO..MAX_PRIO-1 */
 	if ((task->prio >= MAX_RT_PRIO) && (task->prio <= MAX_PRIO-1))
 		return true;
@@ -856,6 +879,12 @@ inline bool test_task_is_rt(struct task_struct *task)
 {
 	DEBUG_BUG_ON(!task);
 
+#ifdef CONFIG_HMBIRD_SCHED
+	if(HMBIRD_OGKI_VERSION == get_hmbird_version_type()) {
+		if (task_is_hmbird(task))
+			return false;
+	}
+#endif
 	/* valid RT priority is 0..MAX_RT_PRIO-1 */
 	if ((task->prio >= 0) && (task->prio <= MAX_RT_PRIO-1))
 		return true;
@@ -1600,10 +1629,47 @@ void android_rvh_find_lowest_rq_handler(void *unused,
 		*best_cpu = cpumask_first(local_cpu_mask);
 }
 
+#ifdef CONFIG_HMBIRD_SCHED
+void scx_sched_fork(struct task_struct *p)
+{
+	struct oplus_task_struct *ots = get_oplus_task_struct(p);
+	struct oplus_task_struct *curr_ots = get_oplus_task_struct(current);
+	if (IS_ERR_OR_NULL(ots))
+		return;
+
+	ots->scx.dsq = NULL;
+	INIT_LIST_HEAD(&ots->scx.dsq_node.fifo);
+	RB_CLEAR_NODE(&ots->scx.dsq_node.priq);
+	ots->scx.flags = 0;
+	ots->scx.dsq_flags = 0;
+	ots->scx.sticky_cpu = -1;
+	ots->scx.runnable_at = INITIAL_JIFFIES;
+	ots->scx.slice = SCX_SLICE_DFL;
+	ots->scx.sched_prop = 0;
+	ots->scx.ext_flags = 0;
+	ots->scx.prio_backup = 0;
+	ots->scx.gdsq_idx = DEFAULT_CGROUP_DL_IDX;
+	memset(&ots->scx.sts, 0, sizeof(struct scx_task_stats));
+	if (!IS_ERR_OR_NULL(curr_ots)) {
+		if ((curr_ots->scx.ext_flags & EXT_FLAG_RT_CHANGED) && !p->sched_reset_on_fork) {
+			ots->scx.ext_flags |= EXT_FLAG_RT_CHANGED;
+			ots->scx.prio_backup = curr_ots->scx.prio_backup;
+		}
+		if (curr_ots->scx.ext_flags & EXT_FLAG_CFS_CHANGED)
+			ots->scx.ext_flags |= EXT_FLAG_CFS_CHANGED;
+	}
+}
+#endif
+
 /* register vender hook in kernel/sched/core.c */
 void android_rvh_sched_fork_handler(void *unused, struct task_struct *p)
 {
 	init_task_ux_info(p);
+#ifdef CONFIG_HMBIRD_SCHED
+	if(HMBIRD_GKI_VERSION == get_hmbird_version_type()) {
+		scx_sched_fork(p);
+	}
+#endif
 }
 
 void android_rvh_after_enqueue_task_handler(void *unused, struct rq *rq, struct task_struct *p, int flags)
@@ -1779,7 +1845,6 @@ static inline void do_boost_kill_task(struct task_struct *p)
 		cpumask_copy(&p->cpus_mask, boost_mask);
 		p->nr_cpus_allowed = cpumask_weight(boost_mask);
 	}
-
 }
 
 void android_vh_exit_signal_handler(void *unused, struct task_struct *p)
@@ -1905,5 +1970,251 @@ void android_vh_sched_setaffinity_early_handler(void *unused, struct task_struct
 
 	if (test_bit(IM_FLAG_FORBID_SET_CPU_AFFINITY, &im_flag))
 		*skip = 1;
+}
+#endif
+
+#ifdef CONFIG_OPLUS_SCHED_GROUP_OPT
+
+static inline s64 entity_key(struct cfs_rq *cfs_rq, struct sched_entity *se)
+{
+	return (s64)(se->vruntime - cfs_rq->min_vruntime);
+}
+
+u64 avg_vruntime(struct cfs_rq *cfs_rq)
+{
+	struct sched_entity *curr = cfs_rq->curr;
+	s64 avg = cfs_rq->avg_vruntime;
+	long load = cfs_rq->avg_load;
+
+	if (curr && curr->on_rq) {
+		unsigned long weight = scale_load_down(curr->load.weight);
+
+		avg += entity_key(cfs_rq, curr) * weight;
+		load += weight;
+	}
+
+	if (load) {
+		/* sign flips effective floor / ceil */
+		if (avg < 0)
+			avg -= (load - 1);
+		avg = div_s64(avg, load);
+	}
+
+	return cfs_rq->min_vruntime + avg;
+}
+
+static inline void update_load_set(struct load_weight *lw, unsigned long w)
+{
+	lw->weight = w;
+	lw->inv_weight = 0;
+}
+
+#define WMULT_CONST	(~0U)
+#define WMULT_SHIFT	32
+
+static void __update_inv_weight(struct load_weight *lw)
+{
+	unsigned long w;
+
+	if (likely(lw->inv_weight))
+		return;
+
+	w = scale_load_down(lw->weight);
+
+	if (BITS_PER_LONG > 32 && unlikely(w >= WMULT_CONST))
+		lw->inv_weight = 1;
+	else if (unlikely(!w))
+		lw->inv_weight = WMULT_CONST;
+	else
+		lw->inv_weight = WMULT_CONST / w;
+}
+
+/*
+ * delta_exec * weight / lw.weight
+ *   OR
+ * (delta_exec * (weight * lw->inv_weight)) >> WMULT_SHIFT
+ *
+ * Either weight := NICE_0_LOAD and lw \e sched_prio_to_wmult[], in which case
+ * we're guaranteed shift stays positive because inv_weight is guaranteed to
+ * fit 32 bits, and NICE_0_LOAD gives another 10 bits; therefore shift >= 22.
+ *
+ * Or, weight =< lw.weight (because lw.weight is the runqueue weight), thus
+ * weight/lw.weight <= 1, and therefore our shift will also be positive.
+ */
+static u64 __calc_delta(u64 delta_exec, unsigned long weight, struct load_weight *lw)
+{
+	u64 fact = scale_load_down(weight);
+	u32 fact_hi = (u32)(fact >> 32);
+	int shift = WMULT_SHIFT;
+	int fs;
+
+	__update_inv_weight(lw);
+
+	if (unlikely(fact_hi)) {
+		fs = fls(fact_hi);
+		shift -= fs;
+		fact >>= fs;
+	}
+
+	fact = mul_u32_u32(fact, lw->inv_weight);
+
+	fact_hi = (u32)(fact >> 32);
+	if (fact_hi) {
+		fs = fls(fact_hi);
+		shift -= fs;
+		fact >>= fs;
+	}
+
+	return mul_u64_u32_shr(delta_exec, fact, shift);
+}
+
+/*
+ * delta /= w
+ */
+static inline u64 calc_delta_fair(u64 delta, struct sched_entity *se)
+{
+	if (unlikely(se->load.weight != NICE_0_LOAD))
+		delta = __calc_delta(delta, NICE_0_LOAD, &se->load);
+
+	return delta;
+}
+
+static s64 entity_lag(u64 avruntime, struct sched_entity *se)
+{
+	s64 vlag, limit;
+
+	vlag = avruntime - se->vruntime;
+	limit = calc_delta_fair(max_t(u64, 2*se->slice, TICK_NSEC), se);
+
+	return clamp(vlag, -limit, limit);
+}
+
+static void reweight_eevdf(struct sched_entity *se, u64 avruntime,
+			   unsigned long weight)
+{
+	unsigned long old_weight = se->load.weight;
+	s64 vlag, vslice;
+
+	/*
+	 * VRUNTIME
+	 * ========
+	 *
+	 * COROLLARY #1: The virtual runtime of the entity needs to be
+	 * adjusted if re-weight at !0-lag point.
+	 *
+	 * Proof: For contradiction assume this is not true, so we can
+	 * re-weight without changing vruntime at !0-lag point.
+	 *
+	 *             Weight	VRuntime   Avg-VRuntime
+	 *     before    w          v            V
+	 *      after    w'         v'           V'
+	 *
+	 * Since lag needs to be preserved through re-weight:
+	 *
+	 *	lag = (V - v)*w = (V'- v')*w', where v = v'
+	 *	==>	V' = (V - v)*w/w' + v		(1)
+	 *
+	 * Let W be the total weight of the entities before reweight,
+	 * since V' is the new weighted average of entities:
+	 *
+	 *	V' = (WV + w'v - wv) / (W + w' - w)	(2)
+	 *
+	 * by using (1) & (2) we obtain:
+	 *
+	 *	(WV + w'v - wv) / (W + w' - w) = (V - v)*w/w' + v
+	 *	==> (WV-Wv+Wv+w'v-wv)/(W+w'-w) = (V - v)*w/w' + v
+	 *	==> (WV - Wv)/(W + w' - w) + v = (V - v)*w/w' + v
+	 *	==>	(V - v)*W/(W + w' - w) = (V - v)*w/w' (3)
+	 *
+	 * Since we are doing at !0-lag point which means V != v, we
+	 * can simplify (3):
+	 *
+	 *	==>	W / (W + w' - w) = w / w'
+	 *	==>	Ww' = Ww + ww' - ww
+	 *	==>	W * (w' - w) = w * (w' - w)
+	 *	==>	W = w	(re-weight indicates w' != w)
+	 *
+	 * So the cfs_rq contains only one entity, hence vruntime of
+	 * the entity @v should always equal to the cfs_rq's weighted
+	 * average vruntime @V, which means we will always re-weight
+	 * at 0-lag point, thus breach assumption. Proof completed.
+	 *
+	 *
+	 * COROLLARY #2: Re-weight does NOT affect weighted average
+	 * vruntime of all the entities.
+	 *
+	 * Proof: According to corollary #1, Eq. (1) should be:
+	 *
+	 *	(V - v)*w = (V' - v')*w'
+	 *	==>    v' = V' - (V - v)*w/w'		(4)
+	 *
+	 * According to the weighted average formula, we have:
+	 *
+	 *	V' = (WV - wv + w'v') / (W - w + w')
+	 *	   = (WV - wv + w'(V' - (V - v)w/w')) / (W - w + w')
+	 *	   = (WV - wv + w'V' - Vw + wv) / (W - w + w')
+	 *	   = (WV + w'V' - Vw) / (W - w + w')
+	 *
+	 *	==>  V'*(W - w + w') = WV + w'V' - Vw
+	 *	==>	V' * (W - w) = (W - w) * V	(5)
+	 *
+	 * If the entity is the only one in the cfs_rq, then reweight
+	 * always occurs at 0-lag point, so V won't change. Or else
+	 * there are other entities, hence W != w, then Eq. (5) turns
+	 * into V' = V. So V won't change in either case, proof done.
+	 *
+	 *
+	 * So according to corollary #1 & #2, the effect of re-weight
+	 * on vruntime should be:
+	 *
+	 *	v' = V' - (V - v) * w / w'		(4)
+	 *	   = V  - (V - v) * w / w'
+	 *	   = V  - vl * w / w'
+	 *	   = V  - vl'
+	 */
+	if (avruntime != se->vruntime) {
+		vlag = entity_lag(avruntime, se);
+		vlag = div_s64(vlag * old_weight, weight);
+		se->vruntime = avruntime - vlag;
+	}
+
+	/*
+	 * DEADLINE
+	 * ========
+	 *
+	 * When the weight changes, the virtual time slope changes and
+	 * we should adjust the relative virtual deadline accordingly.
+	 *
+	 *	d' = v' + (d - v)*w/w'
+	 *	   = V' - (V - v)*w/w' + (d - v)*w/w'
+	 *	   = V  - (V - v)*w/w' + (d - v)*w/w'
+	 *	   = V  + (d - V)*w/w'
+	 */
+	vslice = (s64)(se->deadline - avruntime);
+	vslice = div_s64(vslice * old_weight, weight);
+	se->deadline = avruntime + vslice;
+}
+
+void android_vh_reweight_entity_handler(void *unused, struct sched_entity *se)
+{
+	if (!(global_sched_group_enabled & 0x1))
+		return;
+	if (!entity_is_task(se)) {
+		unsigned long group_weight = clamp(group_cfs_rq(se)->load.weight,
+			scale_load(MIN_SHARES), scale_load(MAX_SHARES));
+		struct cfs_rq *cfs_rq = cfs_rq_of(se);
+		if (se->on_rq) {
+			u64 avruntime = avg_vruntime(cfs_rq);
+			reweight_eevdf(se, avruntime, group_weight);
+		} else {
+				/*
+				 * Because we keep se->vlag = V - v_i, while: lag_i = w_i*(V - v_i),
+				 * we need to scale se->vlag when w_i changes.
+				 */
+				se->vlag = div_s64(se->vlag * se->load.weight, group_weight);
+		}
+
+		update_load_set(&se->load, group_weight);
+	}
 }
 #endif

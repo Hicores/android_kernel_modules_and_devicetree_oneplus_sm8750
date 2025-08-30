@@ -97,6 +97,63 @@ def ddk_module(
     - `kernel_build`
     - `linux_includes`
 
+    It is not recommended that a `ddk_submodule` depends on a `ddk_headers` target that specifies
+    `linux_includes`. If a `ddk_submodule` does depend on a `ddk_headers` target
+    that specifies `linux_includes`, all submodules below the same directory (i.e. sharing the same
+    `Kbuild` file) gets these `linux_includes`. This is because `LINUXINCLUDE` is set for the whole
+    `Kbuild` file, not per compilation unit.
+
+    In particular, a `ddk_submodule` should not depend on `//common:all_headers`.
+    Instead, the dependency should come from the `kernel_build`; that is, the `kernel_build` of
+    the `ddk_module`, or the `base_kernel`, should specify
+    `ddk_module_headers = "//common:all_headers"`.
+
+    To avoid confusion, the dependency on this `ddk_headers` target with `linux_includes` should
+    be moved to the top-level `ddk_module`. In this case, all submodules of this `ddk_module`
+    receives the said `LINUXINCLUDE` from the `ddk_headers` target.
+
+    Example:
+    ```
+    # //common
+    kernel_build(name = "kernel_aarch64", ddk_module_headers = ":all_headers_aarch64")
+    ddk_headers(
+        name = "all_headers_aarch64",
+        linux_includes = [
+            "arch/arm64/include",
+            "arch/arm64/include/uapi",
+            "include",
+            "include/uapi",
+        ],
+    )
+    ```
+    ```
+    # //device
+    kernel_build(name = "tuna", base_kernel = "//common:kernel_aarch64")
+
+    ddk_headers(name = "uapi", linux_includes = ["uapi/include"])
+
+    ddk_module(
+        name = "mymodule",
+        kernel_build = ":tuna",
+        deps = [
+            ":mysubmodule"
+            # Specify dependency on :uapi in the top level ddk_module
+            ":uapi",
+        ],
+    )
+
+    ddk_submodule(
+        name = "mysubmodule",
+        deps = [
+            # Not recommended to specify dependency on :uapi since it contains
+            # linux_includes
+
+            # No need tp specify dependency on //common:all_headers_aarch64
+            # since it comes from :tuna -> //common:kernel_aarch64
+        ]
+    )
+    ```
+
     **Ordering of `includes`**
 
     **The best practice is to not have conflicting header names and search paths.**
@@ -214,15 +271,31 @@ def ddk_module(
         name: Name of target. This should usually be name of the output `.ko` file without the
           suffix.
         srcs: sources and local headers.
+
+            Source files (`.c`, `.S`, `.rs`) must be in the package of
+            this `ddk_module` target, or in subpackages.
+
+            Generated source files (`.c`, `.S`, `.rs`) are accepted as long as
+            they are in the package of this `ddk_module` target, or in
+            subpackages.
+
+            Header files specified here are only visible to this `ddk_module`
+            target, but not dependencies. To export a header so dependencies
+            can use it, put it in `hdrs` and set `includes` accordingly.
+
+            Generated header files are accepted.
         deps: A list of dependent targets. Each of them must be one of the following:
 
             - [`kernel_module`](#kernel_module)
             - [`ddk_module`](#ddk_module)
             - [`ddk_headers`](#ddk_headers).
         hdrs: See [`ddk_headers.hdrs`](#ddk_headers-hdrs)
-        textual_hdrs: See [`ddk_headers.textual_hdrs`](#ddk_headers-textual_hdrs)
+        textual_hdrs: See [`ddk_headers.textual_hdrs`](#ddk_headers-textual_hdrs). DEPRECATED. Use `hdrs`.
         includes: See [`ddk_headers.includes`](#ddk_headers-includes)
         linux_includes: See [`ddk_headers.linux_includes`](#ddk_headers-linux_includes)
+
+          Unlike `ddk_headers.linux_includes`, `ddk_module.linux_includes` is **NOT**
+          applied to dependent `ddk_module`s.
         kernel_build: [`kernel_build`](#kernel_build)
         conditional_srcs: A dictionary that specifies sources conditionally compiled based on configs.
 
@@ -366,12 +439,19 @@ def ddk_module(
           [here](https://docs.bazel.build/versions/main/be/common-definitions.html#common-attributes).
     """
 
+    if textual_hdrs:
+        # buildifier: disable=print
+        print("\nWARNING: textual_hdrs deprecated, use `hdrs` instead.")
+
+    module_hdrs = (hdrs or []) + (textual_hdrs or [])
+
     ddk_config(
         name = name + "_config",
         defconfig = defconfig,
         kconfig = kconfig,
         kernel_build = kernel_build,
         module_deps = deps,
+        module_hdrs = module_hdrs,
         generate_btf = generate_btf,
     )
 
@@ -404,8 +484,7 @@ def ddk_module(
     makefiles(
         name = name + "_makefiles",
         module_srcs = (srcs or []) + flattened_conditional_srcs,
-        module_hdrs = hdrs,
-        module_textual_hdrs = textual_hdrs,
+        module_hdrs = module_hdrs,
         module_includes = includes,
         module_linux_includes = linux_includes,
         module_out = out,
@@ -413,5 +492,6 @@ def ddk_module(
         module_local_defines = local_defines,
         module_copts = copts,
         top_level_makefile = True,
+        kbuild_has_linux_include = True,
         **private_kwargs
     )

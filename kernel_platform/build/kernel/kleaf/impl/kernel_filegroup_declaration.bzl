@@ -20,8 +20,11 @@ load(
     ":constants.bzl",
     "FILEGROUP_DEF_ARCHIVE_SUFFIX",
     "FILEGROUP_DEF_BUILD_FRAGMENT_NAME",
+    "GKI_ARTIFACTS_AARCH64_OUTS",
+    "SIGNED_GKI_ARTIFACTS_ARCHIVE",
 )
 load(":hermetic_toolchain.bzl", "hermetic_toolchain")
+load(":utils.bzl", "utils")
 
 visibility("//build/kernel/kleaf/...")
 
@@ -53,14 +56,23 @@ def _kernel_filegroup_declaration_impl(ctx):
         ))
     kernel_uapi_headers = kernel_uapi_headers_lst[0]
 
+    system_dlkm_staging_archive = utils.find_file(
+        name = "system_dlkm_staging_archive.tar.gz",
+        files = ctx.files.images,
+        what = "{}: images".format(ctx.label),
+        required = False,
+    )
+
     template_file = _write_template_file(
         ctx = ctx,
+        has_system_dlkm_staging_archive = bool(system_dlkm_staging_archive),
     )
     filegroup_decl_file = _write_filegroup_decl_file(
         ctx = ctx,
         info = info,
         deps_files = deps_files,
         kernel_uapi_headers = kernel_uapi_headers,
+        system_dlkm_staging_archive = system_dlkm_staging_archive,
         template_file = template_file,
     )
     filegroup_decl_archive = _create_archive(
@@ -72,8 +84,14 @@ def _kernel_filegroup_declaration_impl(ctx):
     )
     return DefaultInfo(files = depset([filegroup_decl_archive]))
 
-def _write_template_file(ctx):
+def _write_template_file(
+        ctx,
+        has_system_dlkm_staging_archive):
     template_content = """\
+_ALL_MODULE_NAMES = {all_module_names_repr}
+
+_ALL_GKI_ARTIFACTS = {all_gki_artifacts_repr}
+
 platform(
     name = {target_platform_repr},
     constraint_values = [
@@ -96,14 +114,21 @@ platform(
     visibility = ["//visibility:private"],
 )
 
+extracted_gki_artifacts_archive(
+    name = {signed_gki_artifacts_repr},
+    src = {signed_gki_artifacts_src_repr},
+    outs = [artifact for artifact in _ALL_GKI_ARTIFACTS if artifact != "boot-img.tar.gz"],
+    visibility = ["//visibility:public"],
+)
+
 kernel_filegroup(
     name = {name_repr},
-    srcs = {srcs_repr},
+    srcs = {srcs_repr} + {copy_module_symvers_repr},
     deps = {deps_repr} + {extra_deps_repr},
     kernel_uapi_headers = {uapi_headers_repr},
     collect_unstripped_modules = {collect_unstripped_modules_repr},
     strip_modules = {strip_modules_repr},
-    all_module_names = {all_module_names_repr},
+    all_module_names = _ALL_MODULE_NAMES,
     kernel_release = {kernel_release_repr},
     protected_modules_list = {protected_modules_repr},
     ddk_module_defconfig_fragments = {ddk_module_defconfig_fragments_repr},
@@ -119,6 +144,24 @@ kernel_filegroup(
     visibility = ["//visibility:public"],
 )
 """
+
+    if has_system_dlkm_staging_archive:
+        template_content += """\
+
+extracted_system_dlkm_staging_archive(
+    name = {modules_repr},
+    src = {system_dlkm_staging_archive_repr},
+    outs = _ALL_MODULE_NAMES,
+    visibility = ["//visibility:public"],
+)
+
+[filegroup(
+    name = "{}/{}".format({name_repr}, module_name),
+    srcs = [{modules_repr}],
+    output_group = module_name,
+    visibility = ["//visibility:public"],
+) for module_name in _ALL_MODULE_NAMES]
+"""
     template_file = ctx.actions.declare_file("{}/{}_template.txt".format(
         ctx.attr.kernel_build.label.name,
         FILEGROUP_DEF_BUILD_FRAGMENT_NAME.removesuffix(".txt"),
@@ -126,7 +169,13 @@ kernel_filegroup(
     ctx.actions.write(output = template_file, content = template_content)
     return template_file
 
-def _write_filegroup_decl_file(ctx, info, deps_files, kernel_uapi_headers, template_file):
+def _write_filegroup_decl_file(
+        ctx,
+        info,
+        deps_files,
+        kernel_uapi_headers,
+        system_dlkm_staging_archive,
+        template_file):
     ## Reused kwargs for TemplateDict: https://bazel.build/rules/lib/builtins/TemplateDict
     # For a list of files, represented in a list
     # Intentionally not adding comma for the last item so it works for the empty case.
@@ -150,6 +199,11 @@ def _write_filegroup_decl_file(ctx, info, deps_files, kernel_uapi_headers, templ
     sub = ctx.actions.template_dict()
     sub.add("{name_repr}", repr(ctx.attr.kernel_build.label.name))
     sub.add_joined("{srcs_repr}", info.filegroup_srcs, **(join | extra))
+    sub.add_joined(
+        "{copy_module_symvers_repr}",
+        depset(info.copy_module_symvers_outputs),
+        **(join | pkg)
+    )
     sub.add_joined("{deps_repr}", depset(deps_files), **(join | pkg))
     sub.add_joined(
         "{extra_deps_repr}",
@@ -217,6 +271,23 @@ def _write_filegroup_decl_file(ctx, info, deps_files, kernel_uapi_headers, templ
     sub.add("{exec_platform_repr}", repr(ctx.attr.kernel_build.label.name + "_platform_exec"))
     sub.add("{arch}", info.arch)
 
+    if system_dlkm_staging_archive:
+        sub.add("{modules_repr}", repr(ctx.attr.kernel_build.label.name + "_modules"))
+        sub.add_joined(
+            "{system_dlkm_staging_archive_repr}",
+            depset([system_dlkm_staging_archive]),
+            **(one | extra)
+        )
+
+    sub.add("{signed_gki_artifacts_repr}", repr(ctx.attr.kernel_build.label.name + "_signed_gki_artifacts"))
+    sub.add("{signed_gki_artifacts_src_repr}", repr("//{}".format(SIGNED_GKI_ARTIFACTS_ARCHIVE)))
+    sub.add_joined(
+        "{all_gki_artifacts_repr}",
+        depset(GKI_ARTIFACTS_AARCH64_OUTS),
+        map_each = repr,
+        **join
+    )
+
     filegroup_decl_file = ctx.actions.declare_file("{}/{}".format(
         ctx.attr.kernel_build.label.name,
         FILEGROUP_DEF_BUILD_FRAGMENT_NAME,
@@ -246,6 +317,7 @@ def _create_archive(ctx, info, deps_files, kernel_uapi_headers, filegroup_decl_f
     ]
     if info.src_protected_modules_list:
         direct_inputs.append(info.src_protected_modules_list)
+    direct_inputs.extend(info.copy_module_symvers_outputs)
     transitive_inputs = [
         info.ddk_module_defconfig_fragments,
         info.internal_outs,
@@ -293,6 +365,10 @@ kernel_filegroup_declaration = rule(
 
                 These files are not included in the generated archive.
             """,
+            allow_files = True,
+        ),
+        "images": attr.label(
+            doc = "Labels to look up system_dlkm_staging_archive.tar.gz",
             allow_files = True,
         ),
     },

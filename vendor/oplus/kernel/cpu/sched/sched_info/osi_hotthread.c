@@ -248,7 +248,7 @@ void jank_hotthread_update_tick(struct task_struct *p, u64 now)
 	u32 cpu, cluster_id;
 	static int cal_rq_cnt;
 
-	if (!p)
+	if (unlikely(!p))
 		return;
 	ots = get_oplus_task_struct(p);
 	cpu = task_cpu(p);

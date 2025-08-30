@@ -32,6 +32,10 @@ load("//build/kernel/kleaf/impl:kernel_sbom.bzl", "kernel_sbom")
 load("//build/kernel/kleaf/impl:merge_kzip.bzl", "merge_kzip")
 load("//build/kernel/kleaf/impl:out_headers_allowlist_archive.bzl", "out_headers_allowlist_archive")
 load(
+    "//build/kernel/kleaf/tests:runtime_protection_presence_test/symbol_presence_test.bzl",
+    "symbol_presence_test",
+)
+load(
     ":constants.bzl",
     "DEFAULT_GKI_OUTS",
     "X86_64_OUTS",
@@ -56,6 +60,7 @@ load(":print_debug.bzl", "print_debug")
 _COMMON_KERNEL_NAMES = {
     "kernel_aarch64": ["kernel_aarch64"],
     "kernel_aarch64_16k": ["kernel_aarch64_16k", "kernel_aarch64"],
+    "kernel_aarch64_autofdo": ["kernel_aarch64_autofdo", "kernel_aarch64"],
     "kernel_aarch64_interceptor": ["kernel_aarch64_interceptor", "kernel_aarch64"],
     "kernel_aarch64_debug": ["kernel_aarch64_debug", "kernel_aarch64"],
     "kernel_riscv64": ["kernel_riscv64"],
@@ -160,6 +165,15 @@ def _default_target_configs():
             # Assume TRIM_NONLISTED_KMI="" in build.config.gki.aarch64.16k
             "trim_nonlisted_kmi": False,
             "page_size": "16k",
+            # Assume BUILD_GKI_ARTIFACTS=1
+            "build_gki_artifacts": True,
+            "gki_boot_img_sizes": gki_boot_img_sizes,
+        }),
+        "kernel_aarch64_autofdo": dicts.add(aarch64_common, {
+            "trim_nonlisted_kmi": False,
+            # Assume BUILD_GKI_ARTIFACTS=1
+            "build_gki_artifacts": True,
+            "gki_boot_img_sizes": gki_boot_img_sizes,
         }),
         "kernel_aarch64_interceptor": dicts.add(aarch64_common, {
             "enable_interceptor": True,
@@ -599,6 +613,7 @@ def _define_common_kernel(
         build_config,
         toolchain_version,
         visibility,
+        defconfig_fragments = None,
         enable_interceptor = None,
         kmi_symbol_list = None,
         additional_kmi_symbol_lists = None,
@@ -617,12 +632,14 @@ def _define_common_kernel(
         page_size = None,
         deprecation = None,
         ddk_headers_archive = None,
-        extra_dist = None):
+        extra_dist = None,
+        clang_autofdo_profile = None):
     json_target_config = dict(
         name = name,
         outs = outs,
         arch = arch,
         build_config = build_config,
+        defconfig_fragments = defconfig_fragments,
         toolchain_version = toolchain_version,
         visibility = visibility,
         enable_interceptor = enable_interceptor,
@@ -698,6 +715,7 @@ def _define_common_kernel(
             "certs/signing_key.x509",
         ],
         build_config = name + "_build_config",
+        defconfig_fragments = defconfig_fragments,
         enable_interceptor = enable_interceptor,
         visibility = visibility,
         collect_unstripped_modules = _COLLECT_UNSTRIPPED_MODULES,
@@ -718,6 +736,7 @@ def _define_common_kernel(
         ddk_module_defconfig_fragments = [
             Label("//build/kernel/kleaf/impl/defconfig:signing_modules_disabled"),
         ],
+        clang_autofdo_profile = clang_autofdo_profile,
     )
 
     kernel_abi(
@@ -836,23 +855,24 @@ def _define_common_kernel(
         name = name + "_filegroup_declaration",
         kernel_build = name,
         extra_deps = filegroup_extra_deps,
+        images = name + "_images",
         visibility = ["//visibility:private"],
     )
     target_mapping = CI_TARGET_MAPPING.get(name, {})
     write_file(
-        name = name + "_download_configs",
+        name = name + "_ci_target_mapping",
         content = [
-            json.encode_indent(target_mapping.get("download_configs", {})),
+            json.encode_indent(target_mapping),
         ],
         # / is needed to distinguish between variants as 16k (and avoid conflicts).
-        out = name + "/download_configs.json",
+        out = name + "/ci_target_mapping.json",
     )
 
     # Everything in name + "_dist" for the DDK.
     # These are necessary for driver development. Hence they are also added to
     # kernel_*_dist so they can be downloaded.
     ddk_artifacts = [
-        name + "_download_configs",
+        name + "_ci_target_mapping",
         name + "_filegroup_declaration",
         name + "_unstripped_modules_archive",
     ]
@@ -921,6 +941,7 @@ def _define_common_kernel(
         kernel_modules_install = name + "_modules_install",
         modules = (module_implicit_outs or []),
         arch = arch,
+        protected_exports_list = protected_exports_list,
     )
 
     native.test_suite(
@@ -934,7 +955,7 @@ def _define_common_kernel(
 
     kernel_compile_commands(
         name = name + "_compile_commands",
-        kernel_build = name,
+        deps = [name],
     )
 
     kernel_kythe(
@@ -1075,7 +1096,8 @@ def _define_common_kernels_additional_tests(
         kernel_build_name,
         kernel_modules_install,
         modules,
-        arch):
+        arch,
+        protected_exports_list):
     fake_modules_options = Label("//build/kernel/kleaf/artifact_tests:fake_modules_options.txt")
 
     kernel_images(
@@ -1118,13 +1140,28 @@ def _define_common_kernels_additional_tests(
         arch = arch,
     )
 
+    # Note that these tests deliberately refers to //common explicitly, so this test is only
+    # included when we are building //common:kernel_aarch64 (GKI).
+    extra_tests = []
+    if native.package_relative_label(kernel_build_name) == native.package_relative_label("//common:kernel_aarch64"):
+        # This test internally adds the needed checks.
+        symbol_presence_test(
+            name = name + "_runtime_protection_symbol_presence_test",
+            kernel_build = kernel_build_name,
+            protected_exports_list = protected_exports_list,
+            visibility = ["//visibility:private"],
+        )
+        extra_tests.append(
+            name + "_runtime_protection_symbol_presence_test",
+        )
+
     native.test_suite(
         name = name,
         tests = [
             name + "_empty",
             name + "_fake",
             name + "_device_modules_test",
-        ],
+        ] + extra_tests,
     )
 
 def define_db845c(

@@ -158,6 +158,9 @@
 /* This flag is used to skip CPU mapping  */
 #define  FASTRPC_MAP_FD_NOMAP (16)
 
+/* Map the DMA handle in the invoke call for backward compatibility */
+#define FASTRPC_MAP_LEGACY_DMA_HANDLE  0x20000
+
 #define DSP_UNSUPPORTED_API (0x80000414)
 /* MAX NUMBER of DSP ATTRIBUTES SUPPORTED */
 #define FASTRPC_MAX_DSP_ATTRIBUTES (256)
@@ -778,10 +781,7 @@ struct fastrpc_notif_rsp {
 enum fastrpc_process_state {
 	/* Default state */
 	DEFAULT_PROC_STATE = 0,
-	/*
-	 * Process create on DSP initiated.
-	 * This state not being used at present.
-	 */
+	/* Process create on DSP initiated */
 	DSP_CREATE_START,
 	/* Process create on DSP complete */
 	DSP_CREATE_COMPLETE,
@@ -870,7 +870,7 @@ struct fastrpc_user {
 	bool untrusted_process;
 	bool set_session_info;
 	/* Various states throughout process life cycle */
-	enum fastrpc_process_state state;
+	atomic_t state;
 };
 
 struct fastrpc_ctrl_latency {

@@ -137,6 +137,10 @@ static int register_scheduler_vendor_hooks(void)
 #ifdef CONFIG_OPLUS_FEATURE_TICK_GRAN
 	REGISTER_TRACE_VH(sched_switch, sa_sched_switch_handler);
 #endif
+
+#ifdef CONFIG_OPLUS_SCHED_GROUP_OPT
+	REGISTER_TRACE_VH(android_vh_reweight_entity, android_vh_reweight_entity_handler);
+#endif
 	return 0;
 }
 

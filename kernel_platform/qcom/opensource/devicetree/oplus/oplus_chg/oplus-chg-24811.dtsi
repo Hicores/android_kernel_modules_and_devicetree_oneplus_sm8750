@@ -102,10 +102,10 @@
 					450 15 2
 					530 20 3>;
 
-		deep_spec,term_coeff = <3000 300 0
-					3100 450 2
-					3200 600 5
-					3300 650 7>;
+		deep_spec,term_coeff = <3000 800 4
+					3100 900 6
+					3200 1000 9
+					3300 1100 10>;
 		deep_spec,ddrc_strategy_name = "ddrc_curve";
 		deep_spec,volt_step = <20>;
 		deep_spec,ddbc_curve {

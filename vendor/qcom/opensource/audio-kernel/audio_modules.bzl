@@ -41,7 +41,9 @@ audio_modules.register(
         "CONFIG_DIGITAL_CDC_RSC_MGR": [
             "digital-cdc-rsc-mgr.c"
         ]
-    }
+    },
+    deps = [":%b_gpr_dlkm",
+	],
 )
 audio_modules.register(
     name = "audpkt_ion_dlkm",
@@ -57,18 +59,26 @@ audio_modules.register(
         "audio_notifier.c",
         "audio_ssr.c"
     ],
+    deps = [":%b_q6_pdr_dlkm",
+	],
 )
 audio_modules.register(
     name = "adsp_loader_dlkm",
     path = DSP_PATH,
     config_option = "CONFIG_MSM_ADSP_LOADER",
     srcs = ["adsp-loader.c"],
+    deps = [":%b_spf_core_dlkm",
+	],
 )
 audio_modules.register(
     name = "audio_prm_dlkm",
     path = DSP_PATH,
     config_option = "CONFIG_AUDIO_PRM",
     srcs = ["audio_prm.c"],
+    deps = [":%b_spf_core_dlkm",
+            ":%b_gpr_dlkm",
+            ":%b_q6_notifier_dlkm",
+	],
 )
 audio_modules.register(
     name = "q6_pdr_dlkm",
@@ -82,12 +92,19 @@ audio_modules.register(
     path = IPC_PATH,
     config_option = "CONFIG_MSM_QDSP6_GPR_RPMSG",
     srcs = ["gpr-lite.c"],
+    deps = [":%b_q6_notifier_dlkm",
+            ":%b_snd_event_dlkm",
+	],
 )
 audio_modules.register(
     name = "audio_pkt_dlkm",
     path = IPC_PATH,
     config_option = "CONFIG_AUDIO_PKT",
     srcs = ["audio-pkt.c"],
+    deps = [":%b_spf_core_dlkm",
+            ":%b_gpr_dlkm",
+            ":%b_audpkt_ion_dlkm",
+	],
 )
 # >>>> SOC MODULES <<<<
 audio_modules.register(
@@ -95,6 +112,10 @@ audio_modules.register(
     path = SOC_PATH,
     config_option = "CONFIG_PINCTRL_LPI",
     srcs = ["pinctrl-lpi.c"],
+    deps = [":%b_spf_core_dlkm",
+            ":%b_q6_notifier_dlkm",
+            ":%b_snd_event_dlkm",
+	],
 )
 audio_modules.register(
     name = "swr_dlkm",
@@ -116,6 +137,13 @@ audio_modules.register(
             "swr-mstr-ctrl.c"
         ]
     },
+    deps = [":%b_spf_core_dlkm",
+            ":%b_q6_notifier_dlkm",
+            ":%b_snd_event_dlkm",
+            ":%b_swr_dlkm",
+# Add for oplus_daemon_adsp_ssr dependency
+            ":%b_adsp_loader_dlkm",
+	],
 )
 audio_modules.register(
     name = "snd_event_dlkm",
@@ -179,6 +207,18 @@ audio_modules.register(
             "sun.c"
         ]
     },
+    deps = [":%b_spf_core_dlkm",
+            ":%b_audio_prm_dlkm",
+            ":%b_wcd_core_dlkm",
+            ":%b_lpass_cdc_dlkm",
+            ":%b_wcd939x_dlkm",
+            ":%b_lpass_cdc_rx_macro_dlkm",
+            ":%b_wsa883x_dlkm",
+            ":%b_wsa884x_dlkm",
+            ":%b_snd_event_dlkm",
+# Add for extend_codec_i2s_be_dailinks dependency
+            ":%b_oplus_audio_extend",
+	],
 )
 # >>>> ASOC/CODEC MODULES <<<<
 audio_modules.register(
@@ -222,12 +262,19 @@ audio_modules.register(
             "wcd-mbhc-legacy.c"
         ]
     },
+# Add for oplus_daemon_adsp_ssr dependency
+    deps = [":%b_adsp_loader_dlkm",
+    ],
 )
 audio_modules.register(
     name = "swr_dmic_dlkm",
     path = ASOC_CODECS_PATH,
     config_option = "CONFIG_SND_SOC_SWR_DMIC",
-    srcs = ["swr-dmic.c"]
+    srcs = ["swr-dmic.c"],
+    deps = [":%b_wcd939x_dlkm",
+            ":%b_swr_dlkm",
+	],
+
 )
 audio_modules.register(
     name = "wcd9xxx_dlkm",
@@ -250,13 +297,17 @@ audio_modules.register(
                 "wcd-clsh.c"
             ]
         }
-    }
+    },
+    deps = [":%b_audio_prm_dlkm",
+	],
 )
 audio_modules.register(
     name = "swr_haptics_dlkm",
     path = ASOC_CODECS_PATH,
     config_option = "CONFIG_SND_SWR_HAPTICS",
-    srcs = ["swr-haptics.c"]
+    srcs = ["swr-haptics.c"],
+    deps = [":%b_swr_dlkm",
+	],
 )
 audio_modules.register(
     name = "stub_dlkm",
@@ -277,7 +328,12 @@ audio_modules.register(
     name = "lpass_bt_swr_dlkm",
     path = ASOC_CODECS_PATH,
     config_option = "CONFIG_LPASS_BT_SWR",
-    srcs = ["lpass-bt-swr.c"]
+    srcs = ["lpass-bt-swr.c"],
+    deps = [":%b_swr_ctrl_dlkm",
+            ":%b_spf_core_dlkm",
+            ":%b_wcd_core_dlkm",
+            ":%b_snd_event_dlkm",
+	],
 )
 # >>>> ASOC/CODECS/LPASS-CDC MODULES <<<<
 audio_modules.register(
@@ -292,36 +348,57 @@ audio_modules.register(
         "lpass-cdc-tables.c",
         "lpass-cdc-clk-rsc.c",
     ],
+    deps = [":%b_spf_core_dlkm",
+            ":%b_snd_event_dlkm",
+	],
 )
 audio_modules.register(
     name = "lpass_cdc_wsa_macro_dlkm",
     path = ASOC_CODECS_LPASS_CDC_PATH,
     config_option = "CONFIG_LPASS_CDC_WSA_MACRO",
-    srcs = ["lpass-cdc-wsa-macro.c"]
+    srcs = ["lpass-cdc-wsa-macro.c"],
+    deps = [":%b_lpass_cdc_dlkm",
+            ":%b_swr_ctrl_dlkm",
+            ":%b_wcd_core_dlkm",
+	],
 )
 audio_modules.register(
     name = "lpass_cdc_wsa2_macro_dlkm",
     path = ASOC_CODECS_LPASS_CDC_PATH,
     config_option = "CONFIG_LPASS_CDC_WSA2_MACRO",
-    srcs = ["lpass-cdc-wsa2-macro.c"]
+    srcs = ["lpass-cdc-wsa2-macro.c"],
+    deps = [":%b_lpass_cdc_dlkm",
+            ":%b_swr_ctrl_dlkm",
+            ":%b_wcd_core_dlkm",
+	],
 )
 audio_modules.register(
     name = "lpass_cdc_va_macro_dlkm",
     path = ASOC_CODECS_LPASS_CDC_PATH,
     config_option = "CONFIG_LPASS_CDC_VA_MACRO",
-    srcs = ["lpass-cdc-va-macro.c"]
+    srcs = ["lpass-cdc-va-macro.c"],
+    deps = [":%b_lpass_cdc_dlkm",
+            ":%b_swr_ctrl_dlkm",
+            ":%b_wcd_core_dlkm",
+	],
 )
 audio_modules.register(
     name = "lpass_cdc_rx_macro_dlkm",
     path = ASOC_CODECS_LPASS_CDC_PATH,
     config_option = "CONFIG_LPASS_CDC_RX_MACRO",
     srcs = ["lpass-cdc-rx-macro.c"],
+    deps = [":%b_lpass_cdc_dlkm",
+            ":%b_swr_ctrl_dlkm",
+            ":%b_wcd_core_dlkm",
+	],
 )
 audio_modules.register(
     name = "lpass_cdc_tx_macro_dlkm",
     path = ASOC_CODECS_LPASS_CDC_PATH,
     config_option = "CONFIG_LPASS_CDC_TX_MACRO",
-    srcs = ["lpass-cdc-tx-macro.c"]
+    srcs = ["lpass-cdc-tx-macro.c"],
+    deps = [":%b_lpass_cdc_dlkm",
+	],
 )
 # >>>> ASOC/CODECS/BOLERO MODULES <<<<
 audio_modules.register(
@@ -382,6 +459,9 @@ audio_modules.register(
         "wsa883x-regmap.c",
         "wsa883x-tables.c",
     ],
+    deps = [":%b_wcd_core_dlkm",
+            ":%b_swr_dlkm",
+	],
 )
 # >>>> WSA884X MODULE <<<<
 audio_modules.register(
@@ -392,7 +472,10 @@ audio_modules.register(
         "wsa884x.c",
         "wsa884x-regmap.c",
         "wsa884x-tables.c",
-    ]
+    ],
+    deps = [":%b_wcd_core_dlkm",
+            ":%b_swr_dlkm",
+	],
 )
 # >>>> WCD937X MODULES <<<<
 audio_modules.register(
@@ -422,13 +505,20 @@ audio_modules.register(
         "wcd938x-regmap.c",
         "wcd938x-tables.c",
         "wcd938x-mbhc.c",
-    ]
+    ],
+    deps = [":%b_wcd9xxx_dlkm",
+            ":%b_mbhc_dlkm",
+            ":%b_wcd_core_dlkm",
+            ":%b_swr_dlkm",
+	],
 )
 audio_modules.register(
     name = "wcd938x_slave_dlkm",
     path = ASOC_CODECS_PATH + "/wcd938x",
     config_option = "CONFIG_SND_SOC_WCD938X_SLAVE",
-    srcs = ["wcd938x-slave.c"]
+    srcs = ["wcd938x-slave.c"],
+    deps = [":%b_swr_dlkm",
+	],
 )
 # >>>> WCD939X MODULES <<<<
 audio_modules.register(
@@ -441,13 +531,21 @@ audio_modules.register(
         "wcd939x-tables.c",
         "wcd939x-mbhc.c",
         "wcd939x-regulator.c",
-    ]
+    ],
+    deps = [":%b_wcd_core_dlkm",
+            ":%b_swr_dlkm",
+            ":%b_wcd939x_slave_dlkm",
+            ":%b_wcd9xxx_dlkm",
+            ":%b_mbhc_dlkm",
+	],
 )
 audio_modules.register(
     name = "wcd939x_slave_dlkm",
     path = ASOC_CODECS_PATH + "/wcd939x",
     config_option = "CONFIG_SND_SOC_WCD939X_SLAVE",
-    srcs = ["wcd939x-slave.c"]
+    srcs = ["wcd939x-slave.c"],
+    deps = [":%b_swr_dlkm",
+	],
 )
 # >>>> QMP1000 MODULES <<<<
 audio_modules.register(
@@ -457,7 +555,9 @@ audio_modules.register(
     srcs = [
         "qmp-dmic.c",
         "qmp-aggregator.c",
-    ]
+    ],
+    deps = [":%b_swr_dlkm",
+	],
 )
 
 #ifdef OPLUS_ARCH_EXTENDS
@@ -521,6 +621,8 @@ audio_modules.register(
         "sipa_tuning_misc.c",
         "sipa_tuning_if.c",
     ],
-    deps = [":sipa_headers"],
+    deps = [":sipa_headers",
+            ":%b_oplus_audio_sipa",
+           ],
 )
 #endif /* OPLUS_ARCH_EXTENDS */
