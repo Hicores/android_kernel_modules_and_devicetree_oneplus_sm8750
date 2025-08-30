@@ -35,12 +35,14 @@ def kernel_images(
         base_kernel_images = None,
         build_initramfs = None,
         build_vendor_dlkm = None,
+        build_vendor_dlkm_flatten = None,
         build_boot = None,
         build_vendor_boot = None,
         build_vendor_kernel_boot = None,
         build_system_dlkm = None,
         build_system_dlkm_flatten = None,
         build_dtbo = None,
+        build_vendor_dtb = None,
         dtbo_srcs = None,
         dtbo_config = None,
         mkbootimg = None,
@@ -94,6 +96,7 @@ def kernel_images(
 
     Allowed strings in `filegroup.output_group`:
     * `vendor_dlkm.img`, if `build_vendor_dlkm` is set
+    * `vendor_dlkm_flatten.img` if `build_vendor_dlkm_flatten` is not empty
     * `system_dlkm.img`, if `build_system_dlkm` and `system_dlkm_fs_type` is set
     * `system_dlkm.<type>.img` for each of `system_dlkm_fs_types`, if
         `build_system_dlkm` is set and `system_dlkm_fs_types` is not empty.
@@ -147,8 +150,12 @@ def kernel_images(
             `"boot.img"`
           - `vendor_boot.img` if `build_vendor_boot`
           - `RAMDISK_EXT=lz4`. Is used when `ramdisk_compression`(see below) is not specified.
-          - `BOOT_IMAGE_HEADER_VERSION >= 4`, which creates `vendor-bootconfig.img` to contain
-            `VENDOR_BOOTCONFIG if `build_vendor_boot`.
+            - The list contains `ramdisk.<ramdisk_ext>` which means it assumes `build_boot_images`
+              generates this file. See `build_utils.sh` on conditions for when it is actually
+              generated.
+          - if `build_vendor_boot`, it assumes `VENDOR_BOOTCONFIG` is set and
+            `BOOT_IMAGE_HEADER_VERSION >= 4`, which creates `vendor-bootconfig.img` to contain
+            `VENDOR_BOOTCONFIG` .
           - The list contains `dtb.img`
         build_initramfs: Whether to build initramfs. Keep in sync with `BUILD_INITRAMFS`.
         build_system_dlkm: Whether to build system_dlkm.img an image with GKI modules.
@@ -156,6 +163,8 @@ def kernel_images(
           This image have directory structure as `/lib/modules/*.ko` i.e. no `uname -r` in the path.
         build_vendor_dlkm: Whether to build `vendor_dlkm` image. It must be set if
           `vendor_dlkm_modules_list` is set.
+        build_vendor_dlkm_flatten: Whether to build `vendor_dlkm_flatten` image. The image
+          have directory structure as `/lib/modules/*.ko` i.e. no `uname -r` in the path
 
           Note: at the time of writing (Jan 2022),
           `vendor_dlkm.modules.blocklist` is **always** created regardless of
@@ -190,6 +199,8 @@ def kernel_images(
 
           If `dtbo_srcs` is non-empty, `build_dtbo` is `True` by default. Otherwise it is `False`
           by default.
+        build_vendor_dtb: Whether to build `dtb.img` when building any boot images. For compatibility reasons
+            it is True by default when building any boot image.
         dtbo_srcs: list of `*.dtbo` files used to package the `dtbo.img`. Keep this in sync
           with `MKDTIMG_DTBOS`; see example below.
 
@@ -357,10 +368,9 @@ def kernel_images(
                 ramdisk_compression,
                 ramdisk_compression_args,
             ).ramdisk_ext
-            boot_image_outs = [
-                "dtb.img",
-                ramdisk_out,
-            ]
+            boot_image_outs = [ramdisk_out]
+            if build_vendor_dtb == None or build_vendor_dtb:
+                boot_image_outs.append("dtb.img")
 
     boot_image_outs = list(boot_image_outs)
 
@@ -451,6 +461,7 @@ def kernel_images(
             name = "{}_vendor_dlkm_image".format(name),
             kernel_modules_install = kernel_modules_install,
             vendor_boot_modules_load = vendor_boot_modules_load,
+            build_vendor_dlkm_flatten_image = build_vendor_dlkm_flatten,
             deps = deps,
             vendor_dlkm_archive = vendor_dlkm_archive,
             vendor_dlkm_etc_files = vendor_dlkm_etc_files,
@@ -485,6 +496,8 @@ def kernel_images(
             avb_boot_key = avb_boot_key,
             avb_boot_algorithm = avb_boot_algorithm,
             avb_boot_partition_name = avb_boot_partition_name,
+            ramdisk_compression = ramdisk_compression,
+            ramdisk_compression_args = ramdisk_compression_args,
             **kwargs
         )
         all_rules.append(":{}_boot_images".format(name))

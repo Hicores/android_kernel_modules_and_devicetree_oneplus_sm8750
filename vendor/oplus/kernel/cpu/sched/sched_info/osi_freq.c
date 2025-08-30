@@ -64,18 +64,7 @@ void jank_curr_freq_show(struct seq_file *m, u32 win_idx, u64 now)
 {
 }
 
-/* target_freq > policy->max */
-static void update_freq_count(struct cpufreq_policy *policy,
-			u32 old_freq, u32 new_freq, u32 flags)
-{
-}
 
-void jankinfo_update_freq_reach_limit_count(
-			struct cpufreq_policy *policy,
-			u32 old_target_freq, u32 new_target_freq, u32 flags)
-{
-	update_freq_count(policy, old_target_freq, new_target_freq, flags);
-}
 
 /* target_freq > policy->max */
 void jank_burst_freq_show(struct seq_file *m, u32 win_idx, u64 now)

@@ -25,46 +25,36 @@ u32 tasktrack_enable = 1;
 u32 tasktrack_enable;
 #endif
 
-bool is_running(unsigned long nowtype)
-{
-	return !nowtype;
-}
-
-bool is_sleeping(unsigned long nowtype)
-{
-	return test_bit(TRACE_SLEEPING, &nowtype);
-}
-
-bool is_inbinder(unsigned long nowtype)
+static inline  bool is_inbinder(unsigned long nowtype)
 {
 	return test_bit(TRACE_SLEEPING_INBINDER, &nowtype);
 }
 
-bool is_infutex(unsigned long nowtype)
+static inline bool is_infutex(unsigned long nowtype)
 {
 	return test_bit(TRACE_SLEEPING_INFUTEX, &nowtype);
 }
 
-void mark_binder(unsigned long *nowtype)
+static inline void mark_binder(unsigned long *nowtype)
 {
 	set_bit(TRACE_SLEEPING_INBINDER, nowtype);
 }
 
-void mark_futex(unsigned long *nowtype)
+static inline void mark_futex(unsigned long *nowtype)
 {
 	set_bit(TRACE_SLEEPING_INFUTEX, nowtype);
 }
 
-bool is_task_traced(struct task_struct *p, u32 *idx)
+static inline bool is_task_traced(struct task_struct *p, u32 *idx)
 {
 	pid_t pid;
 	u32 task_num, i;
 
-	if (!trace_info || !p)
+	if (unlikely(!trace_info || !p))
 		return false;
 
 	task_num = trace_info->task_num;
-	if (!task_num)
+	if (unlikely(!task_num))
 		return false;
 
 	pid = p->pid;
@@ -170,7 +160,7 @@ void update_tasktrack_time_win(void)
 	dbg_tick = !dbg_tick;
 #endif
 
-	if (!tasktrack_enable || !trace_info)
+	if (unlikely(!tasktrack_enable || !trace_info))
 		return;
 
 	task_num = trace_info->task_num;
@@ -372,11 +362,11 @@ static void jankinfo_update_task_status_cb(struct task_struct *p,
 		update_block_state(p, flags);
 	}
 
-	if (!trace_info || !p || !is_task_traced(p, &idx))
+	if (!is_task_traced(p, &idx))
 		return;
 
 	/* Ignore illegal types */
-	if (type >= TRACE_CNT)
+	if (unlikely(type >= TRACE_CNT))
 		return;
 
 	tmptype = BIT(type);
@@ -425,7 +415,7 @@ void __maybe_unused jankinfo_mark_taskstatus(struct task_struct *p,
 	u32 idx;
 	unsigned long nowtype;
 
-	if (!trace_info || !p || !is_task_traced(p, &idx))
+	if (!is_task_traced(p, &idx))
 		return;
 
 	nowtype = trace_info->task_info[idx].now_type;
@@ -443,17 +433,12 @@ void __maybe_unused jankinfo_mark_taskstatus(struct task_struct *p,
 			p->comm, type, nowtype, enable);
 }
 
-static void gerrit_check_dummy(void)
-{
-	/* TODO: for gerrit check */
-}
-
 #ifdef JANK_DEBUG
 void dump_callstacks(struct task_struct *task, unsigned long *cs, u64 delta)
 {
 	int i;
 
-	if (!task)
+	if (unlikely(!task))
 		return;
 
 	pr_info("[CALL_STACK] ====== [task:%s - %llu] ======\n", task->comm, delta);
@@ -476,7 +461,7 @@ void record_callstacks(struct task_struct *p, struct callstacks *csp, u64 delta)
 	unsigned long *cs;
 	u64 timestamp, now;
 
-	if (!p || !csp)
+	if (unlikely(!csp))
 		return;
 
 	timestamp = csp->last_update_time;
@@ -488,7 +473,7 @@ void record_callstacks(struct task_struct *p, struct callstacks *csp, u64 delta)
 
 	id = csp->id;
 	cs = (unsigned long *)&csp->func[id];
-	memset(cs, 0, sizeof(csp->func[id]));
+	*cs = 0;
 
 	level = stack_trace_save_tsk(p, cs, CALL_STACK_LEVEL, SKIP_LEVEL);
 	if (level < CALL_STACK_LEVEL)
@@ -563,8 +548,8 @@ void jankinfo_tasktrack_update_time(struct task_struct *task,
 	struct task_info *ti = NULL;
 	struct callstacks *cs;
 	u32 winidx;
-	if (!trace_info || !task ||
-		!is_task_traced(task, &idx) || !time_in_ns)
+
+	if (!is_task_traced(task, &idx))
 		return;
 
 	ti = &trace_info->task_info[idx];
@@ -590,7 +575,6 @@ void jankinfo_tasktrack_update_time(struct task_struct *task,
 		record_callstacks(task, cs, time_in_ns);
 	} else if (type == TRACE_DISKSLEEP_INIOWAIT && time_in_ns >= IOWAIT_THRESHOLD) {
 		record_target_iowait(task, type, time_in_ns);
-		gerrit_check_dummy();
 	} else if (type == TRACE_RUNNING) {
 			if (cpumask_test_cpu(task_cpu(task), &silver_cpu)) {
 				ti->delta[TRACE_IN_MINCORE] += time_in_ns;
@@ -648,7 +632,7 @@ void android_vh_futex_sleep_start_handelr(void *unused,
 	u32 idx;
 	unsigned long *now_type;
 
-	if (!trace_info || !p || !is_task_traced(p, &idx))
+	if (!is_task_traced(p, &idx))
 		return;
 
 	now_type = &trace_info->task_info[idx].now_type;
@@ -663,11 +647,11 @@ void android_vh_binder_wait_for_work_hanlder(void *unused,
 	unsigned long *now_type;
 	struct task_struct *p;
 
-	if (!trace_info || !tsk)
+	if (unlikely(!tsk))
 		return;
 
 	p = tsk->task;
-	if (!p || !is_task_traced(p, &idx))
+	if (!is_task_traced(p, &idx))
 		return;
 
 	now_type = &trace_info->task_info[idx].now_type;
@@ -690,7 +674,7 @@ void  ux_throttle_handler(struct task_struct *tsk)
 		cpu = task_cpu(tsk);
 		cur->core_id = cpu;
 		policy = cpufreq_cpu_get(cpu);
-		if (!policy)
+		if (unlikely(!policy))
 			return;
 		cur->freq = policy->cur;
 		cur->max_freq = policy->max;
@@ -704,7 +688,7 @@ void osi_scheduler_tick_handler(void *unused, struct rq *rq)
 {
 	struct oplus_task_struct *ots = get_oplus_task_struct(rq->curr);
 	unsigned int limit;
-	if (!ots)
+	if (unlikely(!ots))
 		return;
 	limit = ux_task_exec_limit(rq->curr);
 	if (ots->total_exec > limit) {

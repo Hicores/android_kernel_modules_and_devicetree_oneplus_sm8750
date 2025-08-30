@@ -232,8 +232,14 @@ function create_modules_staging() {
       -exec ${OBJCOPY:-${CROSS_COMPILE}objcopy} --strip-debug {} \;
   fi
 
-  # create_modules_order_lists() will overwrite modules.order if MODULES_LIST is
-  # set.
+  # create_modules_order_lists() will overwrite modules.order if MODULES_LIST
+  # is set. If we are not trimming unused modules, then backup the original
+  # modules.order file first so we can restore it later once the modules.load
+  # file is generated. This allows us to account for all the modules that were
+  # compiled for later use of the staging archive.
+  if [ -z "${TRIM_UNUSED_MODULES}" ]; then
+    cp -f ${dest_dir}/modules.order ${dest_dir}/modules.order.orig
+  fi
   create_modules_order_lists "${modules_list_file:-""}" "${modules_recovery_list_file:-""}" \
 	                     "${modules_charger_list_file:-""}" ${dest_dir}/modules.order
 
@@ -299,6 +305,55 @@ function create_modules_staging() {
       cp ${mod_order_filepath} ${mod_load_filepath}
     fi
   done
+
+  if [ -z "${TRIM_UNUSED_MODULES}" ]; then
+    # Restore the original modules.order file if we didn't trim the unused
+    # modules. This allows us to account for all the modules that were compiled
+    # for later use of the staging archive.
+    mv -f ${dest_dir}/modules.order.orig ${dest_dir}/modules.order
+  fi
+}
+
+function build_flattened_dlkm_image() {
+  # $1 - image name - either vendor_dlkm.flattened.img or system_dlkm.flattened.img
+  # $2 - staging dir
+  # $3 - props file
+  # $4 - dist_dir
+
+  local image_name=$1
+  local staging_dir=$2
+  local props_file=$3
+  local dist_dir=$4
+  local image_type
+
+  if [[ "${image_name}" =~ "vendor" ]]; then
+    image_type="vendor"
+  elif [[ "${image_name}" =~ "system" ]]; then
+    image_type="system"
+  else
+    echo "ERROR: Unknown flattened image type: $1"
+    exit 1
+  fi
+
+  mkdir -p ${staging_dir}/flatten/lib/modules
+  cp $(find ${staging_dir} -type f -name "*.ko") ${staging_dir}/flatten/lib/modules
+  # Copy required depmod artifacts and scrub required files to correct paths
+  cp $(find ${staging_dir} -name "modules.dep") ${staging_dir}/flatten/lib/modules
+  # Copy modules aliases definitions
+  cp $(find ${staging_dir} -name "modules.alias") ${staging_dir}/flatten/lib/modules
+  # Remove existing paths leaving just basenames
+  sed -i 's/\(kernel\|extra\)[^:[:space:]]*\/\([^:[:space:]]*\.ko\)/\2/g' ${staging_dir}/flatten/lib/modules/modules.dep
+  # Prefix /system/lib/modules/ for every module
+  sed -i "s#\([^:[:space:]]*\.ko\)#/${image_type}/lib/modules/\1#g" ${staging_dir}/flatten/lib/modules/modules.dep
+  cp $(find ${staging_dir} -name "modules.load") ${staging_dir}/flatten/lib/modules
+  sed -i 's#.*/##' ${staging_dir}/flatten/lib/modules/modules.load
+  # Copy the flattened version of modules.load to the dist directory to be
+  # consistent with the non-flattened output.
+  cp ${staging_dir}/flatten/lib/modules/modules.load ${dist_dir}/${image_type}_dlkm.flatten.modules.load
+
+  build_image "${staging_dir}/flatten" "${props_file}" \
+  "${dist_dir}/${image_name}" /dev/null
+
 }
 
 function build_system_dlkm() {
@@ -377,19 +432,10 @@ function build_system_dlkm() {
   # Build flatten image as /lib/modules/*.ko; if unset or null: default false
   if [[ ${SYSTEM_DLKM_GEN_FLATTEN_IMAGE:-0} == "1" ]]; then
     local system_dlkm_flatten_image_name="system_dlkm.flatten.${SYSTEM_DLKM_FS_TYPE}.img"
-    mkdir -p ${SYSTEM_DLKM_STAGING_DIR}/flatten/lib/modules
-    cp $(find ${SYSTEM_DLKM_STAGING_DIR} -type f -name "*.ko") ${SYSTEM_DLKM_STAGING_DIR}/flatten/lib/modules
-    # Copy required depmod artifacts and scrub required files to correct paths
-    cp $(find ${SYSTEM_DLKM_STAGING_DIR} -name "modules.dep") ${SYSTEM_DLKM_STAGING_DIR}/flatten/lib/modules
-    # Remove existing paths leaving just basenames
-    sed -i 's/kernel[^:[:space:]]*\/\([^:[:space:]]*\.ko\)/\1/g' ${SYSTEM_DLKM_STAGING_DIR}/flatten/lib/modules/modules.dep
-    # Prefix /system/lib/modules/ for every module
-    sed -i 's#\([^:[:space:]]*\.ko\)#/system/lib/modules/\1#g' ${SYSTEM_DLKM_STAGING_DIR}/flatten/lib/modules/modules.dep
-    cp $(find ${SYSTEM_DLKM_STAGING_DIR} -name "modules.load") ${SYSTEM_DLKM_STAGING_DIR}/flatten/lib/modules
-    sed -i 's#.*/##' ${SYSTEM_DLKM_STAGING_DIR}/flatten/lib/modules/modules.load
 
-    build_image "${SYSTEM_DLKM_STAGING_DIR}/flatten" "${system_dlkm_props_file}" \
-    "${DIST_DIR}/${system_dlkm_flatten_image_name}" /dev/null
+    build_flattened_dlkm_image "${system_dlkm_flatten_image_name}" "${SYSTEM_DLKM_STAGING_DIR}" \
+      "${system_dlkm_props_file}" "${DIST_DIR}"
+
     generated_images+=(${system_dlkm_flatten_image_name})
    fi
 
@@ -481,10 +527,33 @@ function build_vendor_dlkm() {
   build_image "${VENDOR_DLKM_STAGING_DIR}" "${vendor_dlkm_props_file}" \
     "${DIST_DIR}/vendor_dlkm.img" /dev/null
 
-  avbtool add_hashtree_footer \
-    --partition_name vendor_dlkm \
-    --hash_algorithm sha256 \
-    --image "${DIST_DIR}/vendor_dlkm.img"
+  if [ -z "${VENDOR_DLKM_IMAGE_NAME}" ]; then
+    VENDOR_DLKM_IMAGE_NAME="vendor_dlkm.img"
+  fi
+  local generated_images=(${VENDOR_DLKM_IMAGE_NAME})
+
+ # Build vendor_dlkm flatten image as /lib/modules/*.ko; if unset or null: default false
+  if [[ ${VENDOR_DLKM_GEN_FLATTEN_IMAGE:-0} == "1" ]]; then
+    local vendor_dlkm_flatten_image_name="vendor_dlkm.flatten.img"
+
+    if [ -z "${VENDOR_DLKM_PROPS}" ]; then
+      echo -e "fs_type=${VENDOR_DLKM_FS_TYPE}" >> ${vendor_dlkm_props_file}
+      echo -e "mount_point=vendor_dlkm\n" >> ${vendor_dlkm_props_file}
+    fi
+
+  build_flattened_dlkm_image "${vendor_dlkm_flatten_image_name}" "${VENDOR_DLKM_STAGING_DIR}" \
+    "${vendor_dlkm_props_file}" "${DIST_DIR}"
+
+  generated_images+=(${vendor_dlkm_flatten_image_name})
+  fi
+
+  for image in "${generated_images[@]}"
+  do
+    avbtool add_hashtree_footer \
+      --partition_name vendor_dlkm \
+      --hash_algorithm sha256 \
+      --image "${DIST_DIR}/${image}"
+  done
 
   if [ -n "${vendor_dlkm_archive}" ]; then
     # Archive vendor_dlkm_staging_dir
@@ -572,12 +641,9 @@ function build_boot_images() {
   fi
 
   DTB_FILE_LIST=$(find ${DIST_DIR} -name "*.dtb" | sort)
-  if [ -z "${DTB_FILE_LIST}" ]; then
-    if [ -z "${SKIP_VENDOR_BOOT}" ]; then
-      echo "ERROR: No *.dtb files found in ${DIST_DIR}" >&2
-      exit 1
-    fi
-  else
+  if [ -n "${DTB_IMAGE}" ]; then
+    MKBOOTIMG_ARGS+=("--dtb" "${DTB_IMAGE}")
+  elif [ -n "${DTB_FILE_LIST}" ]; then
     cat $DTB_FILE_LIST > ${DIST_DIR}/dtb.img
     MKBOOTIMG_ARGS+=("--dtb" "${DIST_DIR}/dtb.img")
   fi
@@ -828,7 +894,7 @@ function gki_dry_run_certify_bootimg() {
 
   certify_bootimg --boot_img "$1" \
     --algorithm SHA256_RSA4096 \
-    --key tools/mkbootimg/gki/testdata/testkey_rsa4096.pem \
+    --key ${KLEAF_INTERNAL_GKI_BOOT_IMG_CERTIFICATION_KEY} \
     --gki_info "$2" \
     --output "$1" \
     "${additional_props[@]}"
@@ -1006,6 +1072,12 @@ function extract_git_metadata() {
 import sys, json
 js = json.load(sys.stdin)
 key = sys.argv[1]
+if key in js:
+    print(js[key])
+    sys.exit(0)
+# TODO(b/377954908): Inject all local_path_override from Bazel here.
+key = key.replace("external/kleaf~", "external/kleaf")
+key = key.replace("external/kleaf+", "external/kleaf")
 if key in js:
     print(js[key])
 ' "${git_project_candidate}" <<< "${map}")

@@ -47,7 +47,7 @@ Run `checkpatch.sh` at the root of this package.
 ## ddk_headers
 
 <pre>
-ddk_headers(<a href="#ddk_headers-name">name</a>, <a href="#ddk_headers-hdrs">hdrs</a>, <a href="#ddk_headers-includes">includes</a>, <a href="#ddk_headers-linux_includes">linux_includes</a>, <a href="#ddk_headers-textual_hdrs">textual_hdrs</a>)
+ddk_headers(<a href="#ddk_headers-name">name</a>, <a href="#ddk_headers-hdrs">hdrs</a>, <a href="#ddk_headers-defconfigs">defconfigs</a>, <a href="#ddk_headers-includes">includes</a>, <a href="#ddk_headers-kconfigs">kconfigs</a>, <a href="#ddk_headers-linux_includes">linux_includes</a>, <a href="#ddk_headers-textual_hdrs">textual_hdrs</a>)
 </pre>
 
 A rule that exports a list of header files to be used in DDK.
@@ -86,8 +86,10 @@ ddk_headers(
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="ddk_headers-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
 | <a id="ddk_headers-hdrs"></a>hdrs |  One of the following:<br><br>- Local header files to be exported. You may also need to set the `includes` attribute. - Other `ddk_headers` targets to be re-exported.   | <a href="https://bazel.build/concepts/labels">List of labels</a> | optional |  `[]`  |
+| <a id="ddk_headers-defconfigs"></a>defconfigs |  `defconfig` files.<br><br>Items must already be declared in `kconfigs`. An item not declared in Kconfig and inherited Kconfig files is silently dropped.<br><br>An item declared in `kconfigs` without a specific value in `defconfigs` uses default value specified in `kconfigs`.   | <a href="https://bazel.build/concepts/labels">List of labels</a> | optional |  `[]`  |
 | <a id="ddk_headers-includes"></a>includes |  A list of directories, relative to the current package, that are re-exported as include directories.<br><br>[`ddk_module`](#ddk_module) with `deps` including this target automatically adds the given include directory in the generated `Kbuild` files.<br><br>You still need to add the actual header files to `hdrs`.   | List of strings | optional |  `[]`  |
-| <a id="ddk_headers-linux_includes"></a>linux_includes |  Like `includes` but specified in `LINUXINCLUDES` instead.<br><br>Setting this attribute allows you to override headers from `${KERNEL_DIR}`. See "Order of includes" in [`ddk_module`](#ddk_module) for details.   | List of strings | optional |  `[]`  |
+| <a id="ddk_headers-kconfigs"></a>kconfigs |  Kconfig files.<br><br>See [`Documentation/kbuild/kconfig-language.rst`](https://www.kernel.org/doc/html/latest/kbuild/kconfig.html) for its format.<br><br>Kconfig is optional for a `ddk_module`. The final Kconfig known by this module consists of the following:<br><br>- Kconfig from `kernel_build` - Kconfig from dependent modules, if any - Kconfig of this module, if any   | <a href="https://bazel.build/concepts/labels">List of labels</a> | optional |  `[]`  |
+| <a id="ddk_headers-linux_includes"></a>linux_includes |  Like `includes` but specified in `LINUXINCLUDES` instead.<br><br>Setting this attribute allows you to override headers from `${KERNEL_DIR}`. See "Order of includes" in [`ddk_module`](#ddk_module) for details.<br><br>Like `includes`, `linux_includes` is applied to dependent `ddk_module`s.   | List of strings | optional |  `[]`  |
 | <a id="ddk_headers-textual_hdrs"></a>textual_hdrs |  The list of header files to be textually included by sources.<br><br>This is the location for declaring header files that cannot be compiled on their own; that is, they always need to be textually included by other source files to build valid code.   | <a href="https://bazel.build/concepts/labels">List of labels</a> | optional |  `[]`  |
 
 
@@ -321,10 +323,10 @@ Create a build.config file by concatenating build config fragments.
 ## kernel_compile_commands
 
 <pre>
-kernel_compile_commands(<a href="#kernel_compile_commands-name">name</a>, <a href="#kernel_compile_commands-kernel_build">kernel_build</a>)
+kernel_compile_commands(<a href="#kernel_compile_commands-name">name</a>, <a href="#kernel_compile_commands-deps">deps</a>, <a href="#kernel_compile_commands-kernel_build">kernel_build</a>)
 </pre>
 
-Define an executable that creates `compile_commands.json` from a `kernel_build`.
+Define an executable that creates `compile_commands.json` from kernel targets.
 
 **ATTRIBUTES**
 
@@ -332,7 +334,8 @@ Define an executable that creates `compile_commands.json` from a `kernel_build`.
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="kernel_compile_commands-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
-| <a id="kernel_compile_commands-kernel_build"></a>kernel_build |  The `kernel_build` rule to extract from.   | <a href="https://bazel.build/concepts/labels">Label</a> | required |  |
+| <a id="kernel_compile_commands-deps"></a>deps |  The targets to extract from. The following are allowed:<br><br>- [`kernel_build`](#kernel_build) - [`kernel_module`](#kernel_module) - [`ddk_module`](#ddk_module) - [`kernel_module_group`](#kernel_module_group)   | <a href="https://bazel.build/concepts/labels">List of labels</a> | optional |  `[]`  |
+| <a id="kernel_compile_commands-kernel_build"></a>kernel_build |  The `kernel_build` rule to extract from.<br><br>Deprecated:     Use `deps` instead.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
 
 
 <a id="kernel_filegroup"></a>
@@ -689,6 +692,63 @@ anything except:
 - `kernel_build`
 - `linux_includes`
 
+It is not recommended that a `ddk_submodule` depends on a `ddk_headers` target that specifies
+`linux_includes`. If a `ddk_submodule` does depend on a `ddk_headers` target
+that specifies `linux_includes`, all submodules below the same directory (i.e. sharing the same
+`Kbuild` file) gets these `linux_includes`. This is because `LINUXINCLUDE` is set for the whole
+`Kbuild` file, not per compilation unit.
+
+In particular, a `ddk_submodule` should not depend on `//common:all_headers`.
+Instead, the dependency should come from the `kernel_build`; that is, the `kernel_build` of
+the `ddk_module`, or the `base_kernel`, should specify
+`ddk_module_headers = "//common:all_headers"`.
+
+To avoid confusion, the dependency on this `ddk_headers` target with `linux_includes` should
+be moved to the top-level `ddk_module`. In this case, all submodules of this `ddk_module`
+receives the said `LINUXINCLUDE` from the `ddk_headers` target.
+
+Example:
+```
+# //common
+kernel_build(name = "kernel_aarch64", ddk_module_headers = ":all_headers_aarch64")
+ddk_headers(
+    name = "all_headers_aarch64",
+    linux_includes = [
+        "arch/arm64/include",
+        "arch/arm64/include/uapi",
+        "include",
+        "include/uapi",
+    ],
+)
+```
+```
+# //device
+kernel_build(name = "tuna", base_kernel = "//common:kernel_aarch64")
+
+ddk_headers(name = "uapi", linux_includes = ["uapi/include"])
+
+ddk_module(
+    name = "mymodule",
+    kernel_build = ":tuna",
+    deps = [
+        ":mysubmodule"
+        # Specify dependency on :uapi in the top level ddk_module
+        ":uapi",
+    ],
+)
+
+ddk_submodule(
+    name = "mysubmodule",
+    deps = [
+        # Not recommended to specify dependency on :uapi since it contains
+        # linux_includes
+
+        # No need tp specify dependency on //common:all_headers_aarch64
+        # since it comes from :tuna -> //common:kernel_aarch64
+    ]
+)
+```
+
 **Ordering of `includes`**
 
 **The best practice is to not have conflicting header names and search paths.**
@@ -810,13 +870,13 @@ $(LINUXINCLUDE)
 | :------------- | :------------- | :------------- |
 | <a id="ddk_module-name"></a>name |  Name of target. This should usually be name of the output `.ko` file without the suffix.   |  none |
 | <a id="ddk_module-kernel_build"></a>kernel_build |  [`kernel_build`](#kernel_build)   |  none |
-| <a id="ddk_module-srcs"></a>srcs |  sources and local headers.   |  `None` |
+| <a id="ddk_module-srcs"></a>srcs |  sources and local headers.<br><br>Source files (`.c`, `.S`, `.rs`) must be in the package of this `ddk_module` target, or in subpackages.<br><br>Generated source files (`.c`, `.S`, `.rs`) are accepted as long as they are in the package of this `ddk_module` target, or in subpackages.<br><br>Header files specified here are only visible to this `ddk_module` target, but not dependencies. To export a header so dependencies can use it, put it in `hdrs` and set `includes` accordingly.<br><br>Generated header files are accepted.   |  `None` |
 | <a id="ddk_module-deps"></a>deps |  A list of dependent targets. Each of them must be one of the following:<br><br>- [`kernel_module`](#kernel_module) - [`ddk_module`](#ddk_module) - [`ddk_headers`](#ddk_headers).   |  `None` |
 | <a id="ddk_module-hdrs"></a>hdrs |  See [`ddk_headers.hdrs`](#ddk_headers-hdrs)   |  `None` |
 | <a id="ddk_module-textual_hdrs"></a>textual_hdrs |  See [`ddk_headers.textual_hdrs`](#ddk_headers-textual_hdrs)   |  `None` |
 | <a id="ddk_module-includes"></a>includes |  See [`ddk_headers.includes`](#ddk_headers-includes)   |  `None` |
 | <a id="ddk_module-conditional_srcs"></a>conditional_srcs |  A dictionary that specifies sources conditionally compiled based on configs.<br><br>Example:<br><br><pre><code>conditional_srcs = {&#10;    "CONFIG_FOO": {&#10;        True: ["foo.c"],&#10;        False: ["notfoo.c"]&#10;    }&#10;}</code></pre><br><br>In the above example, if `CONFIG_FOO` is `y` or `m`, `foo.c` is compiled. Otherwise, `notfoo.c` is compiled instead.   |  `None` |
-| <a id="ddk_module-linux_includes"></a>linux_includes |  See [`ddk_headers.linux_includes`](#ddk_headers-linux_includes)   |  `None` |
+| <a id="ddk_module-linux_includes"></a>linux_includes |  See [`ddk_headers.linux_includes`](#ddk_headers-linux_includes)<br><br>Unlike `ddk_headers.linux_includes`, `ddk_module.linux_includes` is **NOT** applied to dependent `ddk_module`s.   |  `None` |
 | <a id="ddk_module-out"></a>out |  The output module file. This should usually be `"{name}.ko"`.<br><br>This is required if this target does not contain submodules.   |  `None` |
 | <a id="ddk_module-local_defines"></a>local_defines |  List of defines to add to the compile line.<br><br>**Order matters**. To prevent buildifier from sorting the list, use the `# do not sort` magic line.<br><br>Each string is prepended with `-D` and added to the compile command line for this target, but not to its dependents.<br><br>Unlike [`cc_library.local_defines`](https://bazel.build/reference/be/c-cpp#cc_library.local_defines), this is not subject to ["Make" variable substitution](https://bazel.build/reference/be/make-variables) or [`$(location)` substitution](https://bazel.build/reference/be/make-variables#predefined_label_variables).<br><br>Each string is treated as a single Bourne shell token. Unlike [`cc_library.local_defines`](https://bazel.build/reference/be/c-cpp#cc_library.local_defines), this is not subject to [Bourne shell tokenization](https://bazel.build/reference/be/common-definitions#sh-tokenization). The behavior is similar to `cc_library` with the `no_copts_tokenization` [feature](https://bazel.build/reference/be/functions#package.features). For details about `no_copts_tokenization`, see [`cc_library.copts`](https://bazel.build/reference/be/c-cpp#cc_library.copts).   |  `None` |
 | <a id="ddk_module-copts"></a>copts |  Add these options to the compilation command.<br><br>**Order matters**. To prevent buildifier from sorting the list, use the `# do not sort` magic line.<br><br>Subject to [`$(location)` substitution](https://bazel.build/reference/be/make-variables#predefined_label_variables).<br><br>The flags take effect only for compiling this target, not its dependencies, so be careful about header files included elsewhere.<br><br>All host paths should be provided via [`$(location)` substitution](https://bazel.build/reference/be/make-variables#predefined_label_variables). See "Implementation detail" section below.<br><br>Each `$(location)` expression should occupy its own token. For example:<br><br><pre><code># Good&#10;copts = ["-include", "$(location //other:header.h)"]&#10;&#10;# BAD -- DON'T DO THIS!&#10;copts = ["-include $(location //other:header.h)"]&#10;&#10;# BAD -- DON'T DO THIS!&#10;copts = ["-include=$(location //other:header.h)"]</code></pre><br><br>Unlike [`cc_library.local_defines`](https://bazel.build/reference/be/c-cpp#cc_library.local_defines), this is not subject to ["Make" variable substitution](https://bazel.build/reference/be/make-variables).<br><br>Each string is treated as a single Bourne shell token. Unlike [`cc_library.copts`](https://bazel.build/reference/be/c-cpp#cc_library.copts) this is not subject to [Bourne shell tokenization](https://bazel.build/reference/be/common-definitions#sh-tokenization). The behavior is similar to `cc_library` with the `no_copts_tokenization` [feature](https://bazel.build/reference/be/functions#package.features). For details about `no_copts_tokenization`, see [`cc_library.copts`](https://bazel.build/reference/be/c-cpp#cc_library.copts).<br><br>Because each string is treated as a single Bourne shell token, if a plural `$(locations)` expression expands to multiple paths, they are treated as a single Bourne shell token, which is likely an undesirable behavior. To avoid surprising behaviors, use singular `$(location)` expressions to ensure that the label only expands to one path. For differences between the `$(locations)` and `$(location)`, see [`$(location)` substitution](https://bazel.build/reference/be/make-variables#predefined_label_variables).<br><br>**Implementation detail**: Unlike usual `$(location)` expansion, `$(location)` in `copts` is expanded to a path relative to the current package before sending to the compiler.<br><br>For example:<br><br><pre><code># package: //package&#10;ddk_module(&#10;  name = "my_module",&#10;  copts = ["-include", "$(location //other:header.h)"],&#10;  srcs = ["//other:header.h", "my_module.c"],&#10;)</code></pre> Then the generated Makefile contains:<br><br><pre><code>ccflags-y += -include ../other/header.h</code></pre><br><br>The behavior is such because the generated `Makefile` is located in `package/Makefile`, and `make` is executed under `package/`. In order to find `other/header.h`, its path relative to `package/` is given.   |  `None` |
@@ -868,6 +928,10 @@ ddk_module(
 
 `linux_includes` must be specified in the top-level `ddk_module`; see
 [`ddk_module.linux_includes`](#ddk_module-linux_includes).
+
+`ddk_submodule` should avoid depending on `ddk_headers` that has
+`linux_includes`. See the Submodules section in [`ddk_module`](#ddk_module)
+for best practices.
 
 **Ordering of `includes`**
 
@@ -1179,13 +1243,13 @@ Specify a kernel DTS tree.
 
 <pre>
 kernel_images(<a href="#kernel_images-name">name</a>, <a href="#kernel_images-kernel_modules_install">kernel_modules_install</a>, <a href="#kernel_images-kernel_build">kernel_build</a>, <a href="#kernel_images-base_kernel_images">base_kernel_images</a>, <a href="#kernel_images-build_initramfs">build_initramfs</a>,
-              <a href="#kernel_images-build_vendor_dlkm">build_vendor_dlkm</a>, <a href="#kernel_images-build_boot">build_boot</a>, <a href="#kernel_images-build_vendor_boot">build_vendor_boot</a>, <a href="#kernel_images-build_vendor_kernel_boot">build_vendor_kernel_boot</a>,
-              <a href="#kernel_images-build_system_dlkm">build_system_dlkm</a>, <a href="#kernel_images-build_system_dlkm_flatten">build_system_dlkm_flatten</a>, <a href="#kernel_images-build_dtbo">build_dtbo</a>, <a href="#kernel_images-dtbo_srcs">dtbo_srcs</a>, <a href="#kernel_images-dtbo_config">dtbo_config</a>,
-              <a href="#kernel_images-mkbootimg">mkbootimg</a>, <a href="#kernel_images-deps">deps</a>, <a href="#kernel_images-boot_image_outs">boot_image_outs</a>, <a href="#kernel_images-modules_list">modules_list</a>, <a href="#kernel_images-modules_recovery_list">modules_recovery_list</a>,
-              <a href="#kernel_images-modules_charger_list">modules_charger_list</a>, <a href="#kernel_images-modules_blocklist">modules_blocklist</a>, <a href="#kernel_images-modules_options">modules_options</a>, <a href="#kernel_images-vendor_ramdisk_binaries">vendor_ramdisk_binaries</a>,
-              <a href="#kernel_images-vendor_ramdisk_dev_nodes">vendor_ramdisk_dev_nodes</a>, <a href="#kernel_images-system_dlkm_fs_type">system_dlkm_fs_type</a>, <a href="#kernel_images-system_dlkm_fs_types">system_dlkm_fs_types</a>,
-              <a href="#kernel_images-system_dlkm_modules_list">system_dlkm_modules_list</a>, <a href="#kernel_images-system_dlkm_modules_blocklist">system_dlkm_modules_blocklist</a>, <a href="#kernel_images-system_dlkm_props">system_dlkm_props</a>,
-              <a href="#kernel_images-vendor_dlkm_archive">vendor_dlkm_archive</a>, <a href="#kernel_images-vendor_dlkm_etc_files">vendor_dlkm_etc_files</a>, <a href="#kernel_images-vendor_dlkm_fs_type">vendor_dlkm_fs_type</a>,
+              <a href="#kernel_images-build_vendor_dlkm">build_vendor_dlkm</a>, <a href="#kernel_images-build_vendor_dlkm_flatten">build_vendor_dlkm_flatten</a>, <a href="#kernel_images-build_boot">build_boot</a>, <a href="#kernel_images-build_vendor_boot">build_vendor_boot</a>,
+              <a href="#kernel_images-build_vendor_kernel_boot">build_vendor_kernel_boot</a>, <a href="#kernel_images-build_system_dlkm">build_system_dlkm</a>, <a href="#kernel_images-build_system_dlkm_flatten">build_system_dlkm_flatten</a>, <a href="#kernel_images-build_dtbo">build_dtbo</a>,
+              <a href="#kernel_images-dtbo_srcs">dtbo_srcs</a>, <a href="#kernel_images-dtbo_config">dtbo_config</a>, <a href="#kernel_images-mkbootimg">mkbootimg</a>, <a href="#kernel_images-deps">deps</a>, <a href="#kernel_images-boot_image_outs">boot_image_outs</a>, <a href="#kernel_images-modules_list">modules_list</a>,
+              <a href="#kernel_images-modules_recovery_list">modules_recovery_list</a>, <a href="#kernel_images-modules_charger_list">modules_charger_list</a>, <a href="#kernel_images-modules_blocklist">modules_blocklist</a>, <a href="#kernel_images-modules_options">modules_options</a>,
+              <a href="#kernel_images-vendor_ramdisk_binaries">vendor_ramdisk_binaries</a>, <a href="#kernel_images-vendor_ramdisk_dev_nodes">vendor_ramdisk_dev_nodes</a>, <a href="#kernel_images-system_dlkm_fs_type">system_dlkm_fs_type</a>,
+              <a href="#kernel_images-system_dlkm_fs_types">system_dlkm_fs_types</a>, <a href="#kernel_images-system_dlkm_modules_list">system_dlkm_modules_list</a>, <a href="#kernel_images-system_dlkm_modules_blocklist">system_dlkm_modules_blocklist</a>,
+              <a href="#kernel_images-system_dlkm_props">system_dlkm_props</a>, <a href="#kernel_images-vendor_dlkm_archive">vendor_dlkm_archive</a>, <a href="#kernel_images-vendor_dlkm_etc_files">vendor_dlkm_etc_files</a>, <a href="#kernel_images-vendor_dlkm_fs_type">vendor_dlkm_fs_type</a>,
               <a href="#kernel_images-vendor_dlkm_modules_list">vendor_dlkm_modules_list</a>, <a href="#kernel_images-vendor_dlkm_modules_blocklist">vendor_dlkm_modules_blocklist</a>, <a href="#kernel_images-vendor_dlkm_props">vendor_dlkm_props</a>,
               <a href="#kernel_images-ramdisk_compression">ramdisk_compression</a>, <a href="#kernel_images-ramdisk_compression_args">ramdisk_compression_args</a>, <a href="#kernel_images-unpack_ramdisk">unpack_ramdisk</a>, <a href="#kernel_images-avb_sign_boot_img">avb_sign_boot_img</a>,
               <a href="#kernel_images-avb_boot_partition_size">avb_boot_partition_size</a>, <a href="#kernel_images-avb_boot_key">avb_boot_key</a>, <a href="#kernel_images-avb_boot_algorithm">avb_boot_algorithm</a>, <a href="#kernel_images-avb_boot_partition_name">avb_boot_partition_name</a>,
@@ -1210,6 +1274,7 @@ filegroup(
 
 Allowed strings in `filegroup.output_group`:
 * `vendor_dlkm.img`, if `build_vendor_dlkm` is set
+* `vendor_dlkm_flatten.img` if `build_vendor_dlkm_flatten` is not empty
 * `system_dlkm.img`, if `build_system_dlkm` and `system_dlkm_fs_type` is set
 * `system_dlkm.<type>.img` for each of `system_dlkm_fs_types`, if
     `build_system_dlkm` is set and `system_dlkm_fs_types` is not empty.
@@ -1234,7 +1299,8 @@ For details, see
 | <a id="kernel_images-kernel_build"></a>kernel_build |  A `kernel_build` rule. Must specify if `build_boot`.   |  `None` |
 | <a id="kernel_images-base_kernel_images"></a>base_kernel_images |  The `kernel_images()` corresponding to the `base_kernel` of the `kernel_build`. This is required for building a device-specific `system_dlkm` image. For example, if `base_kernel` of `kernel_build()` is `//common:kernel_aarch64`, then `base_kernel_images` is `//common:kernel_aarch64_images`.<br><br>This is also required if `dedup_dlkm_modules and not build_system_dlkm`.   |  `None` |
 | <a id="kernel_images-build_initramfs"></a>build_initramfs |  Whether to build initramfs. Keep in sync with `BUILD_INITRAMFS`.   |  `None` |
-| <a id="kernel_images-build_vendor_dlkm"></a>build_vendor_dlkm |  Whether to build `vendor_dlkm` image. It must be set if `vendor_dlkm_modules_list` is set.<br><br>Note: at the time of writing (Jan 2022), `vendor_dlkm.modules.blocklist` is **always** created regardless of the value of `VENDOR_DLKM_MODULES_BLOCKLIST`. If `build_vendor_dlkm()` in `build_utils.sh` does not generate `vendor_dlkm.modules.blocklist`, an empty file is created.   |  `None` |
+| <a id="kernel_images-build_vendor_dlkm"></a>build_vendor_dlkm |  Whether to build `vendor_dlkm` image. It must be set if `vendor_dlkm_modules_list` is set.   |  `None` |
+| <a id="kernel_images-build_vendor_dlkm_flatten"></a>build_vendor_dlkm_flatten |  Whether to build `vendor_dlkm_flatten` image. The image have directory structure as `/lib/modules/*.ko` i.e. no `uname -r` in the path<br><br>Note: at the time of writing (Jan 2022), `vendor_dlkm.modules.blocklist` is **always** created regardless of the value of `VENDOR_DLKM_MODULES_BLOCKLIST`. If `build_vendor_dlkm()` in `build_utils.sh` does not generate `vendor_dlkm.modules.blocklist`, an empty file is created.   |  `None` |
 | <a id="kernel_images-build_boot"></a>build_boot |  Whether to build boot image. It must be set if either `BUILD_BOOT_IMG` or `BUILD_VENDOR_BOOT_IMG` is set.<br><br>This depends on `kernel_build`. Hence, if this is set to `True`, `kernel_build` must be set.<br><br>If `True`, adds `boot.img` to `boot_image_outs` if not already in the list.   |  `None` |
 | <a id="kernel_images-build_vendor_boot"></a>build_vendor_boot |  Whether to build `vendor_boot.img`. It must be set if either `BUILD_BOOT_IMG` or `BUILD_VENDOR_BOOT_IMG` is set, and `SKIP_VENDOR_BOOT` is not set, and `BUILD_VENDOR_KERNEL_BOOT` is not set.<br><br>At most **one** of `build_vendor_boot` and `build_vendor_kernel_boot` may be set to `True`.<br><br>If `True`, adds `vendor_boot.img` to `boot_image_outs` if not already in the list.   |  `None` |
 | <a id="kernel_images-build_vendor_kernel_boot"></a>build_vendor_kernel_boot |  Whether to build `vendor_kernel_boot.img`. It must be set if either `BUILD_BOOT_IMG` or `BUILD_VENDOR_BOOT_IMG` is set, and `SKIP_VENDOR_BOOT` is not set, and `BUILD_VENDOR_KERNEL_BOOT` is set.<br><br>At most **one** of `build_vendor_boot` and `build_vendor_kernel_boot` may be set to `True`.<br><br>If `True`, adds `vendor_kernel_boot.img` to `boot_image_outs` if not already in the list.   |  `None` |
@@ -1245,7 +1311,7 @@ For details, see
 | <a id="kernel_images-dtbo_config"></a>dtbo_config |  a config file to create dtbo image by cfg_create command.   |  `None` |
 | <a id="kernel_images-mkbootimg"></a>mkbootimg |  Path to the mkbootimg.py script which builds boot.img. Only used if `build_boot`. If `None`, default to `//tools/mkbootimg:mkbootimg.py`. NOTE: This overrides `MKBOOTIMG_PATH`.   |  `None` |
 | <a id="kernel_images-deps"></a>deps |  Additional dependencies to build images.<br><br>This must include the following: - For `initramfs`:   - The file specified by `MODULES_LIST`   - The file specified by `MODULES_BLOCKLIST`, if `MODULES_BLOCKLIST` is set   - The file containing the list of modules needed for booting into recovery.   - The file containing the list of modules needed for booting into charger mode. - For `vendor_dlkm` image:   - The file specified by `VENDOR_DLKM_MODULES_LIST`   - The file specified by `VENDOR_DLKM_MODULES_BLOCKLIST`, if set   - The file specified by `VENDOR_DLKM_PROPS`, if set   - The file specified by `selinux_fc` in `VENDOR_DLKM_PROPS`, if set   |  `None` |
-| <a id="kernel_images-boot_image_outs"></a>boot_image_outs |  A list of output files that will be installed to `DIST_DIR` when `build_boot_images` in `build/kernel/build_utils.sh` is executed.<br><br>You may leave out `vendor_boot.img` from the list. It is automatically added when `build_vendor_boot = True`.<br><br>If `build_boot` is equal to `False`, the default is empty.<br><br>If `build_boot` is equal to `True`, the default list assumes the following: - `BOOT_IMAGE_FILENAME` is not set (which takes default value `boot.img`), or is set to   `"boot.img"` - `vendor_boot.img` if `build_vendor_boot` - `RAMDISK_EXT=lz4`. Is used when `ramdisk_compression`(see below) is not specified. - `BOOT_IMAGE_HEADER_VERSION >= 4`, which creates `vendor-bootconfig.img` to contain   `VENDOR_BOOTCONFIG if `build_vendor_boot`. - The list contains `dtb.img`   |  `None` |
+| <a id="kernel_images-boot_image_outs"></a>boot_image_outs |  A list of output files that will be installed to `DIST_DIR` when `build_boot_images` in `build/kernel/build_utils.sh` is executed.<br><br>You may leave out `vendor_boot.img` from the list. It is automatically added when `build_vendor_boot = True`.<br><br>If `build_boot` is equal to `False`, the default is empty.<br><br>If `build_boot` is equal to `True`, the default list assumes the following: - `BOOT_IMAGE_FILENAME` is not set (which takes default value `boot.img`), or is set to   `"boot.img"` - `vendor_boot.img` if `build_vendor_boot` - `RAMDISK_EXT=lz4`. Is used when `ramdisk_compression`(see below) is not specified.   - The list contains `ramdisk.<ramdisk_ext>` which means it assumes `build_boot_images`     generates this file. See `build_utils.sh` on conditions for when it is actually     generated. - if `build_vendor_boot`, it assumes `VENDOR_BOOTCONFIG` is set and   `BOOT_IMAGE_HEADER_VERSION >= 4`, which creates `vendor-bootconfig.img` to contain   `VENDOR_BOOTCONFIG` . - The list contains `dtb.img`   |  `None` |
 | <a id="kernel_images-modules_list"></a>modules_list |  A file containing list of modules to use for `vendor_boot.modules.load`.   |  `None` |
 | <a id="kernel_images-modules_recovery_list"></a>modules_recovery_list |  A file containing a list of modules to load when booting into recovery.   |  `None` |
 | <a id="kernel_images-modules_charger_list"></a>modules_charger_list |  A file containing a list of modules to load when booting into charger mode.   |  `None` |

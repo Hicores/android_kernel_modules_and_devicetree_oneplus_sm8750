@@ -249,22 +249,6 @@ inline int get_task_cgroup_id(struct task_struct *task) { return 0; }
 #if  IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
 // todo add ux type
 #endif
-static int test_task_top_app(struct task_struct *task)
-{
-	return (SA_CGROUP_TOP_APP == get_task_cgroup_id(task)) ? 1 : 0;
-}
-static int test_task_fg(struct task_struct *task)
-{
-	return (SA_CGROUP_FOREGROUND == get_task_cgroup_id(task)) ? 1 : 0;
-}
-static int test_task_sys_bg(struct task_struct *task)
-{
-	 return (SA_CGROUP_SYS_BACKGROUND == get_task_cgroup_id(task)) ? 1 : 0;
-}
-static int test_task_bg(struct task_struct *task)
-{
-	return (SA_CGROUP_BACKGROUND == get_task_cgroup_id(task)) ? 1 : 0;
-}
 
 void ohm_trig_init(void)
 {
@@ -397,10 +381,6 @@ static inline void ohm_sched_stat_record_common(struct sched_stat_para *sched_st
 	} else if (delta_ms >= sched_stat->low_thresh_ms) {
 		stat_common->low_cnt++;
 	}
-
-	if (sched_stat == &sched_para[OHM_SCHED_FSYNC] || sched_stat == &sched_para[OHM_SCHED_IOWAIT]) {
-		ohm_latency_dist_record(stat_common, delta_ms);
-	}
 }
 
 static inline void _ohm_para_init(struct sched_stat_para *sched_para)
@@ -429,8 +409,10 @@ void ohm_schedstats_record(int sched_type, struct task_struct *task, u64 delta_m
 {
 	struct sched_stat_para *sched_stat = &sched_para[sched_type];
 	static DEFINE_RATELIMIT_STATE(ratelimit, 60*HZ, 1);
+	int grp_id;
 	unsigned long flags;
 
+	grp_id = get_task_cgroup_id(task);
 	spin_lock_irqsave(&sched_stat->lock, flags);
 	if (unlikely(!sched_stat->ctrl)) {
 		spin_unlock_irqrestore(&sched_stat->lock, flags);
@@ -439,7 +421,7 @@ void ohm_schedstats_record(int sched_type, struct task_struct *task, u64 delta_m
 	sched_stat->delta_ms = delta_ms;
 	ohm_sched_stat_record_common(sched_stat, &sched_stat->all, delta_ms);
 
-	if (test_task_fg(task)) {
+	if (SA_CGROUP_FOREGROUND == grp_id) {
 		ohm_sched_stat_record_common(sched_stat, &sched_stat->fg, delta_ms);
 		if (unlikely(delta_ms >= sched_stat->high_thresh_ms)) {
 			if (sched_para[sched_type].logon  && __ratelimit(&ratelimit)) {
@@ -457,16 +439,16 @@ void ohm_schedstats_record(int sched_type, struct task_struct *task, u64 delta_m
 		ohm_sched_stat_record_common(sched_stat, &sched_stat->ux, delta_ms);
 	}
 #endif
-	if (test_task_top_app(task)) {
+	if (SA_CGROUP_TOP_APP == grp_id) {
 		ohm_sched_stat_record_common(sched_stat, &sched_stat->top, delta_ms);
 	}
 	if (rt_task(task)) {
 		ohm_sched_stat_record_common(sched_stat, &sched_stat->rt, delta_ms);
 	}
-	if (test_task_bg(task)) {
+	if (SA_CGROUP_FOREGROUND == grp_id) {
 		ohm_sched_stat_record_common(sched_stat, &sched_stat->bg, delta_ms);
 	}
-	if (test_task_sys_bg(task)) {
+	if (SA_CGROUP_SYS_BACKGROUND == grp_id) {
 		ohm_sched_stat_record_common(sched_stat, &sched_stat->sysbg, delta_ms);
 	}
 	spin_unlock_irqrestore(&sched_stat->lock, flags);
@@ -1077,7 +1059,7 @@ static void update_runnable_time_handler(void *data, bool preempt, struct task_s
 	struct rq *rq;
 	struct oplus_task_struct *ots_next;
 
-	if (!next)
+	if (unlikely(!next))
 		return;
 	ots_next = get_oplus_task_struct(next);
 	if (!rt_task(next) || !ots_next)

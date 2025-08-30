@@ -3759,13 +3759,9 @@
 	};
 
 	qseecom_ta_mem: qseecom_ta_region {
-		/* ifdef OPLUS_FEATURE_FINGERPRINT */
-		compatible = "removed-dma-pool";
-		/* endif OPLUS_FEATURE_FINGERPRINT */
+		compatible = "shared-dma-pool";
 		alloc-ranges = <0x0 0x00000000 0x0 0xffffffff>;
-		/* ifdef OPLUS_FEATURE_FINGERPRINT */
-		no-map;
-		/* endif OPLUS_FEATURE_FINGERPRINT */
+		reusable;
 		alignment = <0x0 0x400000>;
 		size = <0x0 0x1400000>;
 	};

@@ -211,8 +211,7 @@ void cpufreq_health_get_edtask_state(int cpu, int edtask_flag)
 
 	policy = cpufreq_cpu_get(cpu);
 
-	if (!policy) {
-		pr_info("cpu %d, policy is null\n", cpu);
+	if (unlikely(!policy)) {
 		return;
 	}
 
@@ -220,22 +219,22 @@ void cpufreq_health_get_edtask_state(int cpu, int edtask_flag)
 	cluster_id = topology_cluster_id(first_cpu);
 	cpufreq_cpu_put(policy);
 
-	if (cluster_id >= MAX_CLUSTERS)
+	if (unlikely(cluster_id >= MAX_CLUSTERS))
 		return;
 
 	och = &oplus_cpufreq_health[cluster_id];
 
-	if (och->is_init == 0)
+	if (unlikely(och->is_init == 0))
 		return;
 
 	idx = cpu - first_cpu;
 
-	if (idx < 0 || idx >= och->cpu_count)
+	if (unlikely(idx < 0 || idx >= och->cpu_count))
 		return;
 
 	idx = cpu - first_cpu;
 
-	if (idx < 0 || idx >= och->cpu_count)
+	if (unlikely(idx < 0 || idx >= och->cpu_count))
 		return;
 
 	now = ktime_get_ns();
@@ -281,7 +280,7 @@ void cpufreq_health_get_newtask_state(struct cpufreq_policy *policy, int newtask
 	unsigned long flags;
 
 	cluster_id = topology_cluster_id(first_cpu);
-	if (cluster_id >= MAX_CLUSTERS)
+	if (unlikely(cluster_id >= MAX_CLUSTERS))
 		return;
 
 	och = &oplus_cpufreq_health[cluster_id];
@@ -377,7 +376,7 @@ void cpufreq_health_get_state(struct cpufreq_policy *policy)
 	unsigned long flags;
 
 	cluster_id = topology_cluster_id(first_cpu);
-	if (cluster_id >= MAX_CLUSTERS)
+	if (unlikely(cluster_id >= MAX_CLUSTERS))
 		return;
 
 	och = &oplus_cpufreq_health[cluster_id];
@@ -489,7 +488,7 @@ int cpufreq_health_register(struct cpufreq_policy *policy)
 		return -ENODEV;
 
 	cluster_id = topology_cluster_id(first_cpu);
-	if (cluster_id >= MAX_CLUSTERS) {
+	if (unlikely(cluster_id >= MAX_CLUSTERS)) {
 		pr_err("Unsupported number of clusters(%d). Only %u supported\n",
 				cluster_id, MAX_CLUSTERS);
 		return -EINVAL;

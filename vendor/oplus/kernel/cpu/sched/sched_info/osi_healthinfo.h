@@ -123,7 +123,7 @@ struct sched_stat_common {
 	u64 total_ms;
 	u64 total_cnt;
 	u64 latency_dist[OHM_LATENCY_DIST_MAX];
-};
+} ____cacheline_aligned;
 
 struct sched_stat_para {
 	bool ctrl;
@@ -140,7 +140,7 @@ struct sched_stat_para {
 	struct sched_stat_common top;
 	struct sched_stat_common bg;
 	struct sched_stat_common sysbg;
-};
+} ____cacheline_aligned;
 
 extern struct sched_stat_para sched_para[OHM_SCHED_TOTAL];
 

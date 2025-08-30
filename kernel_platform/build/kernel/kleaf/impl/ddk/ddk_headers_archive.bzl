@@ -16,14 +16,23 @@
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("//build/kernel/kleaf/impl:hermetic_toolchain.bzl", "hermetic_toolchain")
-load(":ddk/ddk_headers.bzl", "DdkHeadersInfo")
+load(
+    ":ddk/ddk_headers.bzl",
+    "DdkHeadersInfo",
+)
 
 visibility("//build/kernel/kleaf/...")
 
-def _drop_package(x, package):
+def _drop_path_prefix(x, package):
     if type(x) == "File":
         x = x.path
     return paths.relativize(x, package)
+
+def _gather_includes(ddk_include_info):
+    return ddk_include_info.includes
+
+def _gather_linux_includes(ddk_include_info):
+    return ddk_include_info.linux_includes
 
 def _create_build_frag_for_src(ctx, src):
     """Create a single BUILD.bazel fragment for an item in srcs.
@@ -41,8 +50,8 @@ def _create_build_frag_for_src(ctx, src):
             src = src.label,
         ))
 
-    src_package = str(src.label.package)
-    drop_src_package = lambda x: _drop_package(x, src_package)
+    src_package = paths.join(src.label.workspace_root, src.label.package)
+    drop_src_package = lambda x: _drop_path_prefix(x, src_package)
 
     build_file = ctx.actions.declare_file("{name}/{src_package}/{src_name}/gen_BUILD.bazel".format(
         name = ctx.attr.name,
@@ -61,17 +70,15 @@ def _create_build_frag_for_src(ctx, src):
     )
     args.add_all(
         "--includes",
-        src[DdkHeadersInfo].includes,
+        src[DdkHeadersInfo].include_infos,
         uniquify = True,
-        map_each = drop_src_package,
-        allow_closure = True,
+        map_each = _gather_includes,
     )
     args.add_all(
         "--linux-includes",
-        src[DdkHeadersInfo].linux_includes,
+        src[DdkHeadersInfo].include_infos,
         uniquify = True,
-        map_each = drop_src_package,
-        allow_closure = True,
+        map_each = _gather_linux_includes,
     )
     args.add("--out", build_file)
     args.add("--name", src.label.name)
@@ -188,10 +195,11 @@ def _create_archive(ctx, package_files):
         )
 
     cmd += """
-        tar czf {out} --dereference -T "$@"
+        tar czf {out} {transform} --dereference -T "$@"
     """.format(
         out = out.path,
         package = ctx.label.package,
+        transform = "--transform 's:^{}/::'".format(ctx.label.workspace_root) if ctx.label.workspace_root else "",
     )
     args = ctx.actions.args()
     args.set_param_file_format("multiline")

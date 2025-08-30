@@ -34,6 +34,9 @@
 	qseecom_ta_region {
 		status = "disabled";
 	};
+	qseecom_ta_region_cust {
+		status = "okay";
+	};
 	// #endif /* OPLUS_FEATURE_UFF_FINGERPRINT */
 };
 

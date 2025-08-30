@@ -305,11 +305,11 @@ static void build_oplus_cpu_array(void)
 
 void update_ux_sched_cputopo(void)
 {
-	unsigned long prev_cap = 0;
 	unsigned long cpu_cap = 0;
 	unsigned int cpu = 0;
 	int i = 0, insert_idx = 0, cls_nr = 0;
 	struct ux_sched_cluster sched_cls;
+	int cls_id = -1, prev_cls_id = -1;
 
 	/* reset prev cpu topo info */
 	sched_init_ux_cputopo();
@@ -317,10 +317,12 @@ void update_ux_sched_cputopo(void)
 	/* update new cpu topo info */
 	for_each_possible_cpu(cpu) {
 		cpu_cap = arch_scale_cpu_capacity(cpu);
-		/* add cpu with same capacity into target sched_cls */
-		if (cpu_cap == prev_cap) {
+		cls_id = topology_cluster_id(cpu);
+
+		/* add cpu with same cls_id into target sched_cls, mtk can update capacity in mtk_update_cpu_capacity */
+		if (cls_id == prev_cls_id) {
 			for (i = 0; i < ux_sched_cputopo.cls_nr; ++i) {
-				if (cpu_cap == ux_sched_cputopo.sched_cls[i].capacity) {
+				if (cls_id == i) {
 					cpumask_set_cpu(cpu, &ux_sched_cputopo.sched_cls[i].cpus);
 					break;
 				}
@@ -338,7 +340,7 @@ void update_ux_sched_cputopo(void)
 			ux_sched_cputopo.sched_cls[cls_nr] = sched_cls;
 		} else {
 			for (i = 0; i <= ux_sched_cputopo.cls_nr; ++i) {
-				if (sched_cls.capacity < ux_sched_cputopo.sched_cls[i].capacity) {
+				if (cls_id < i || ux_sched_cputopo.sched_cls[i].capacity == ULONG_MAX) {
 					insert_idx = i;
 					break;
 				}
@@ -354,8 +356,9 @@ void update_ux_sched_cputopo(void)
 		}
 		ux_sched_cputopo.cls_nr++;
 
-		prev_cap = cpu_cap;
+		prev_cls_id = cls_id;
 	}
+
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_LOADBALANCE)
 	build_oplus_cpu_array();
 #endif
@@ -840,11 +843,12 @@ static inline bool oplus_is_min_capacity_cpu(int cpu)
 {
 	struct ux_sched_cputopo ux_cputopo = ux_sched_cputopo;
 	int cls_nr = ux_cputopo.cls_nr - 1;
+	int cls_id = topology_cluster_id(cpu);
 
 	if (unlikely(cls_nr <= 0))
 		return false;
 
-	return capacity_orig_of(cpu) <= ux_cputopo.sched_cls[0].capacity;
+	return cls_id <= 0;
 }
 
 bool oplus_task_misfit(struct task_struct *tsk, int cpu)
