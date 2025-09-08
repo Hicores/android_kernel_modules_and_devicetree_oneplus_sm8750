@@ -30,6 +30,7 @@ struct oplus_mms_gauge {
 	struct oplus_mms *parallel_topic;
 	struct oplus_mms *batt_bal_topic;
 	struct oplus_mms *wls_topic;
+	struct oplus_mms *cpa_topic;
 	struct mms_subscribe *comm_subs;
 	struct mms_subscribe *wired_subs;
 	struct mms_subscribe *gauge_subs;
@@ -37,6 +38,7 @@ struct oplus_mms_gauge {
 	struct mms_subscribe *parallel_subs;
 	struct mms_subscribe *wls_subs;
 	struct mms_subscribe *batt_bal_subs;
+	struct mms_subscribe *cpa_subs;
 
 	struct delayed_work hal_gauge_init_work;
 	struct delayed_work get_reserve_calib_info_work;

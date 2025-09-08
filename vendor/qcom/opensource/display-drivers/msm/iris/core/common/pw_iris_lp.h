@@ -165,6 +165,14 @@ enum iris_dma_event_trigger_source {
 	DMA_EVENT_DTG_EVS_PRE = 7,
 };
 
+enum iris_bsram_owner {
+	IRIS_BSRAM_FRC,
+	IRIS_BSRAM_PTSR,
+	IRIS_BSRAM_DEBUG,
+	IRIS_BSRAM_DEF,
+	IRIS_BSRAM_MAX,
+};
+
 /* parse low power control info */
 int32_t iris_parse_lp_ctrl(struct device_node *np, struct iris_cfg *pcfg);
 
@@ -197,7 +205,7 @@ int iris_dphy_itf_check(bool aux_channel);
 int iris_pmu_pq_set(bool on);
 
 /* power on & off bulksram domain */
-int iris_pmu_bsram_set(bool on, bool chain);
+int iris_pmu_bsram_set(bool on, bool chain, uint8_t bsram_owner_index);
 int iris_pmu_bsram_set_i5(bool on);
 
 /* power on & off frc domain */

@@ -1002,6 +1002,33 @@ void oplus_sde_encoder_phys_cmd_wait_for_wr_ptr_pre(struct drm_connector *conn)
 	return;
 }
 
+void oplus_dsi_ctrl_configure_pre(struct dsi_ctrl *dsi_ctrl, u32 *sched_line_no)
+{
+	struct dsi_mode_info *timing = &(dsi_ctrl->host_config.video_timing);
+	struct dsi_display *display = get_main_display();
+	char tag_name[64];
+	u32 refresh_rate = 0;
+
+	if (!display || !display->panel) {
+		OPLUS_DSI_ERR("primary display or primary_display->panel is null\n");
+		return;
+	}
+
+	if (display->panel->cur_mode) {
+		refresh_rate = display->panel->cur_mode->timing.refresh_rate;
+	}
+	if (display->panel->oplus_panel.last_refresh_rate != refresh_rate) {
+		g_oplus_send_fps_code = true;
+	}
+	*sched_line_no = g_oplus_send_fps_code ? 1 : ((*sched_line_no == 0) ? 1 :*sched_line_no);
+	snprintf(tag_name, sizeof(tag_name), "cur_refresh_rate[%d]-*sched_line_no[%d]", timing->refresh_rate, *sched_line_no);
+
+	SDE_ATRACE_BEGIN(tag_name);
+	SDE_ATRACE_END(tag_name);
+	SDE_EVT32(dsi_ctrl->cell_index, SDE_EVTLOG_FUNC_EXIT,
+		*sched_line_no);
+}
+
 void oplus_display_ops_init(struct oplus_display_ops *oplus_display_ops)
 {
 	DRM_INFO("oplus display ops init\n");
@@ -1088,6 +1115,7 @@ void oplus_display_ops_init(struct oplus_display_ops *oplus_display_ops)
 	oplus_display_ops->dsi_message_tx_pre = oplus_dsi_message_tx_pre;
 	oplus_display_ops->dsi_message_tx_post = oplus_dsi_message_tx_post;
 	oplus_display_ops->panel_parse_cmd_sets_sub = oplus_panel_parse_cmd_sets_sub;
+	oplus_display_ops->dsi_ctrl_configure_pre = oplus_dsi_ctrl_configure_pre;
 
 	/* aod */
 	oplus_display_ops->panel_set_lp1 = oplus_panel_set_lp1;

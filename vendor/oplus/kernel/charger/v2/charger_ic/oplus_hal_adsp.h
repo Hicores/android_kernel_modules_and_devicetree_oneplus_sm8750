@@ -600,6 +600,25 @@ enum oplus_sub_btb_adc_index {
 	OPLUS_SUB_BTB_VALD_MAX_ADC,
 	OPLUS_SUB_BTB_MAX,
 };
+
+#define OPLUS_CHG_TRACK_PLAT_CALI_INFO_LEN	300
+
+enum oplus_gauge_track_type {
+	GAUGE_TRACK_CALI_FLAG_ZCV = 1,
+	GAUGE_TRACK_CALI_FLAG_AGING = 2,
+	GAUGE_TRACK_CALI_FLAG_PLUGOUT = 4,
+	GAUGE_TRACK_CALI_FLAG_CHG_FULL = 5
+};
+
+struct gauge_track_cali_info_s {
+	int vbat;
+	int tbat;
+	int soc;
+	int cycle_count;
+	int learn_capacity;
+	int imp;
+	int soh;
+};
 #endif
 
 struct battery_chg_dev {
@@ -696,6 +715,12 @@ struct battery_chg_dev {
 	bool					voocphy_err_check;
 	bool			bypass_vooc_support;
 	bool			usb_aicl_enhance;
+	bool				qcom_gauge_cali_track_support;
+	struct gauge_track_cali_info_s 	*pre_info;
+	struct work_struct		gauge_cali_track_by_plug_work;
+	struct work_struct		gauge_cali_track_by_full_work;
+	struct mutex                    pre_info_lock;
+	struct mutex                    cur_info_lock;
 #endif
 #ifdef OPLUS_FEATURE_CHG_BASIC
 	int vchg_trig_irq;

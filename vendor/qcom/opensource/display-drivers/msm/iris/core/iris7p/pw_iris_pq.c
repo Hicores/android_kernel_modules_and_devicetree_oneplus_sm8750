@@ -35,11 +35,13 @@ void iris_quality_setting_off_i7p(void)
 	iris_setting.quality_cur.al_bl_ratio = 0;
 	iris_setting.quality_cur.pq_setting.cmcolorgamut = 0;
 	iris_cm_color_gamut_set_i7p(
-			iris_setting.quality_cur.pq_setting.cmcolorgamut, true);
+			iris_setting.quality_cur.pq_setting.cmcolorgamut, false);
 	iris_brightness_para_reset();
 	iris_csc_para_reset();
 	iris_csc2_para_reset();
 	iris_dpp_precsc_enable_i7p(false, false);
+	iris_setting.quality_cur.scurvelevel = 0;
+	iris_scurve_enable_set(iris_setting.quality_cur.scurvelevel);
 }
 
 void iris_dpp_precsc_enable_i7p(u32 enable, bool bcommit)
@@ -48,12 +50,15 @@ void iris_dpp_precsc_enable_i7p(u32 enable, bool bcommit)
 	uint32_t csc_ctrl = 0;
 
 	payload = iris_get_ipopt_payload_data(IRIS_IP_DPP, 0x30, 2);
+	if (NULL == payload) {
+		IRIS_LOGE("[%d] Get ipopt payload data failed!", __LINE__);
+		return;
+	}
 	csc_ctrl = payload[0] & 0xdeff;
 	if (enable)
 		csc_ctrl = csc_ctrl | 0x1 << 8;
 	iris_set_ipopt_payload_data(IRIS_IP_DPP, 0x30, 2, csc_ctrl);
 	iris_init_update_ipopt_t(IRIS_IP_DPP, 0x30, 0x30, 0x01);
-	payload = iris_get_ipopt_payload_data(IRIS_IP_DPP, 0x30, 2);
 
 	if (bcommit)
 		iris_end_dpp_i7p(true);
@@ -296,6 +301,11 @@ void iris_cm_ratio_set_i7p(void)
 		iris_init_update_ipopt_t(IRIS_IP_DPP, 0x33, 0x33, 0x01);
 
 		payload = iris_get_ipopt_payload_data(IRIS_IP_DPP, 0xc0, 2);
+		if (NULL == payload) {
+			IRIS_LOGE("[%d] Get ipopt payload data failed!", __LINE__);
+			return;
+		}
+
 		for (i = 0; i < 3; i++)
 			payload[i] = dwCSC2CoffValue[i + 9];
 		iris_init_update_ipopt_t(IRIS_IP_DPP, 0xc0, 0xc0, 0x01);
@@ -309,6 +319,11 @@ void iris_cm_ratio_set_i7p(void)
 		iris_init_update_ipopt_t(IRIS_IP_DPP, 0x33, 0x33, 0x01);
 
 		payload = iris_get_ipopt_payload_data(IRIS_IP_DPP, 0xc0, 2);
+		if (NULL == payload) {
+			IRIS_LOGE("[%d] Get ipopt payload data failed!", __LINE__);
+			return;
+		}
+
 		for (i = 0; i < 3; i++)
 			payload[i] = 0;
 		iris_init_update_ipopt_t(IRIS_IP_DPP, 0xc0, 0xc0, 0x01);
@@ -349,6 +364,10 @@ void iris_cm_color_gamut_set_i7p(u32 level, bool bcommit)
 	iris_init_update_ipopt_t(IRIS_IP_DPP, 0x50, 0x50, 0x01);
 
 	payload = iris_get_ipopt_payload_data(IRIS_IP_DPP, 0x51, 2);
+	if (NULL == payload) {
+		IRIS_LOGE("[%d] Get ipopt payload data failed!", __LINE__);
+		return;
+	}
 
 	switch (level) {
 	case 1:
@@ -422,6 +441,11 @@ void iris_cm_color_gamut_set_i7p(u32 level, bool bcommit)
 
 	apl = (aplstatus_value & (0x1 << interp1_src)) ? 1 : 0;
 	payload = iris_get_ipopt_payload_data(IRIS_IP_DPP, 0x20, 2);
+	if (NULL == payload) {
+		IRIS_LOGE("[%d] Get ipopt payload data failed!", __LINE__);
+		return;
+	}
+
 	currentmode = payload[0] & 0x7;
 	if (apl == 0) {
 		gammactrl = payload[0] & 0xff0; //65bin gamma
@@ -457,6 +481,11 @@ void iris_lux_set_i7p(u32 level, bool update)
 
 	level = level >> 1;
 	payload = iris_get_ipopt_payload_data(IRIS_IP_DPP, 0x90, 10);
+	if (NULL == payload) {
+		IRIS_LOGE("[%d] Get ipopt payload data failed!", __LINE__);
+		return;
+	}
+
 	payload[0] = (payload[0] & ~0xffff0000) | (level << 16);
 	iris_update_ip_opt(IRIS_IP_DPP, 0x90, 1);
 	if (update)
@@ -469,6 +498,11 @@ void iris_al_enable_i7p(bool enable)
 	uint32_t  *payload = NULL;
 
 	payload = iris_get_ipopt_payload_data(IRIS_IP_DPP, 0x90, 2);
+	if (NULL == payload) {
+		IRIS_LOGE("[%d] Get ipopt payload data failed!", __LINE__);
+		return;
+	}
+
 	payload[0] &= ~0x00000001;
 	if (enable == true)
 		payload[0] |= 0x00000001;
@@ -504,6 +538,11 @@ void iris_dom_set_i7p(int mode)
 		return;
 
 	payload = iris_get_ipopt_payload_data(IRIS_IP_DPORT, 0x01, 2);
+	if (NULL == payload) {
+		IRIS_LOGE("[%d] Get ipopt payload data failed!", __LINE__);
+		return;
+	}
+
 	dport_ctrl0 = payload[0];
 	dport_ctrl0 &= ~0xc000;
 	dport_ctrl0 |= (mode & 0x3) << 14;
@@ -525,10 +564,20 @@ void iris_csc2_para_set_i7p(uint32_t *values)
 
 	//pre csc
 	payload = iris_get_ipopt_payload_data(IRIS_IP_DPP, 0x34, 2);
+	if (NULL == payload) {
+		IRIS_LOGE("[%d] Get ipopt payload data failed!", __LINE__);
+		return;
+	}
+
 	for (i = 0; i < 5; i++)
 		payload[i] = values[i];
 	iris_init_update_ipopt_t(IRIS_IP_DPP, 0x34, 0x34, 0x01);
 	payload = iris_get_ipopt_payload_data(IRIS_IP_DPP, 0xd0, 2);
+	if (NULL == payload) {
+		IRIS_LOGE("[%d] Get ipopt payload data failed!", __LINE__);
+		return;
+	}
+
 	for (i = 0; i < 3; i++)
 		payload[i] = values[i + 5];
 	iris_init_update_ipopt_t(IRIS_IP_DPP, 0xd0, 0xd0, 0x01);
@@ -575,10 +624,20 @@ void iris_csc2_para_set_i7p(uint32_t *values)
 		values[4] = 0x0000 << 16 | dwCSC2CoffValue[8];
 
 		payload = iris_get_ipopt_payload_data(IRIS_IP_DPP, 0x33, 2);
+		if (NULL == payload) {
+			IRIS_LOGE("[%d] Get ipopt payload data failed!", __LINE__);
+			return;
+		}
+
 		for (i = 0; i < 5; i++)
 			payload[i] = values[i];
 		iris_init_update_ipopt_t(IRIS_IP_DPP, 0x33, 0x33, 0x01);
 		payload = iris_get_ipopt_payload_data(IRIS_IP_DPP, 0xc0, 2);
+		if (NULL == payload) {
+			IRIS_LOGE("[%d] Get ipopt payload data failed!", __LINE__);
+			return;
+		}
+
 		for (i = 0; i < 3; i++)
 			payload[i] = dwCSC2CoffValue[i + 9];
 		iris_init_update_ipopt_t(IRIS_IP_DPP, 0xc0, 0xc0, 0x01);
@@ -592,6 +651,11 @@ void iris_pwil_dpp_en_i7p(bool dpp_en)
 	u32 cmd[4];
 
 	payload = iris_get_ipopt_payload_data(IRIS_IP_PWIL, 0x01, 4);
+	if (NULL == payload) {
+		IRIS_LOGE("[%d] Get ipopt payload data failed!", __LINE__);
+		return;
+	}
+
 	if (dpp_en)
 		payload[0] |= 0x10;
 	else
@@ -622,6 +686,11 @@ void iris_scurve_enable_set(u32 level)
 		enable = 1;
 
 	payload = iris_get_ipopt_payload_data(IRIS_IP_DPP, 0x70, 2);
+	if (NULL == payload) {
+		IRIS_LOGE("[%d] Get ipopt payload data failed!", __LINE__);
+		return;
+	}
+
 	payload[0] &= ~0x00000001;
 	payload[0] |= enable;
 	iris_init_update_ipopt_t(IRIS_IP_DPP, 0x70, 0x70, 0x01);
@@ -639,6 +708,11 @@ void iris_scurve_update_i7p(u32 *buffer)
 	int i;
 
 	payload = iris_get_ipopt_payload_data(IRIS_IP_DPP, 0xee, 2);
+	if (NULL == payload) {
+		IRIS_LOGE("[%d] Get ipopt payload data failed!", __LINE__);
+		return;
+	}
+
 	for (i = 0; i < 34; i++)
 		payload[i] = buffer[i];
 	iris_init_update_ipopt_t(IRIS_IP_DPP, 0xee, 0xee, 0x01);

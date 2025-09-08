@@ -2606,6 +2606,10 @@ static bool oplus_voocphy_check_slave_cp_status(struct oplus_voocphy_manager *ch
 					    oplus_voocphy_get_ichg_devation(chip),
 					    chip->cp_ibus_devation,
 					    i);
+				if (oplus_chglib_is_wired_present(chip->dev) == false) {
+					voocphy_err("offline!!\n");
+					return false;
+				}
 			} else {
 				voocphy_err("slave cp is not in trouble!\n");
 				return true;

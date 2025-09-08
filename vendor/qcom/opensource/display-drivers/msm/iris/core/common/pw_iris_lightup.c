@@ -978,6 +978,36 @@ static int32_t _iris_parse_ocp_read_path(const struct device_node *np,
 	return rc;
 }
 
+static int32_t _iris_parse_ocp_write_path(const struct device_node *np,
+		struct iris_cfg *pcfg)
+{
+	int32_t rc = 0;
+	struct iris_dts_ops *p_dts_ops = iris_get_dts_ops();
+
+	if (!p_dts_ops)
+		return -EINVAL;
+
+	pcfg->ocp_write_by_i2c = p_dts_ops->read_bool(np, "pxlw,ocp_write_by_i2c");
+
+	IRIS_LOGI("%s(), pxlw ocp write path: %s", __func__, pcfg->ocp_write_by_i2c ? "i2c" : "dsi");
+
+	return rc;
+}
+
+static int32_t _iris_parse_disable_dtg_eco(const struct device_node *np,
+		struct iris_cfg *pcfg)
+{
+	int32_t rc = 0;
+	struct iris_dts_ops *p_dts_ops = iris_get_dts_ops();
+
+	if (!p_dts_ops)
+		return -EINVAL;
+
+	pcfg->disable_dtg_eco = p_dts_ops->read_bool(np, "pxlw,disable_dtg_eco");
+
+	return rc;
+}
+
 static int32_t _iris_parse_platform_type(const struct device_node *np,
 		struct iris_cfg *pcfg)
 {
@@ -1880,6 +1910,8 @@ static int  _pw_iris_parse_subnode(void *node)
 		iris_parse_cmd_param(lightup_node);
 
 	_iris_parse_ocp_read_path(lightup_node, pcfg);
+	_iris_parse_ocp_write_path(lightup_node, pcfg);
+	_iris_parse_disable_dtg_eco(lightup_node, pcfg);
 
 	_iris_parse_i2c_switch_config(lightup_node, pcfg);
 
@@ -2143,10 +2175,10 @@ static int32_t _iris_i2c_send_ocp_cmds(struct iris_cmd_comp *pcmd_comp)
 		msg[i].len = pcmd_comp->cmd[i].msg.tx_len;
 	}
 
-	if (pcfg->iris_chip_type == CHIP_IRIS8 || pcfg->iris_chip_type == CHIP_IRIS5)
-		ret = iris_pure_i2c_multi_write(msg, msg_num);
-	else
+	if (pcfg->iris_chip_type == CHIP_IRIS7)
 		ret = iris_i2c_multi_write(msg, msg_num);
+	else
+		ret = iris_pure_i2c_multi_write(msg, msg_num);
 
 	kfree(msg);
 
@@ -2535,7 +2567,6 @@ static int32_t _iris_dsi_send_ocp_cmds(struct iris_cmd_comp *pcmd_comp)
 int32_t _iris_send_cmds(struct iris_cmd_comp *pcmd_comp, uint8_t path)
 {
 	int32_t ret = 0;
-	struct iris_cfg *pcfg = iris_get_cfg();
 
 	IRIS_LOGD("%s,%d: path = %d", __func__, __LINE__, path);
 
@@ -2543,11 +2574,10 @@ int32_t _iris_send_cmds(struct iris_cmd_comp *pcmd_comp, uint8_t path)
 		IRIS_LOGE("cmd list is null");
 		return -EINVAL;
 	}
+	path = iris_get_cfg()->iris_i2c_preload ? PATH_I2C : path;
 
 	IRIS_ATRACE_BEGIN("_iris_send_cmds");
-	if (pcfg && pcfg->iris_i2c_preload)
-		ret = _iris_i2c_s_send_ocp_cmds(pcmd_comp);
-	else if (path == PATH_DSI)
+	if (path == PATH_DSI)
 		ret = _iris_dsi_send_ocp_cmds(pcmd_comp);
 	else if (path == PATH_I2C)
 		ret = _iris_i2c_send_ocp_cmds(pcmd_comp);
@@ -2575,6 +2605,7 @@ int32_t iris_send_ipopt_cmds(int32_t ip, int32_t opt_id)
 	struct iris_cmd_comp cmd_comp;
 	struct iris_cmd_desc *cmd;
 	int32_t i = 0;
+	struct iris_cfg *pcfg = iris_get_cfg();
 
 	IRIS_LOGD("%s(), i_p: %#x, opt: %#x.", __func__, ip, opt_id);
 	rc = _iris_init_cmd_comp(ip, opt_id, &cmd_comp);
@@ -2602,7 +2633,10 @@ int32_t iris_send_ipopt_cmds(int32_t ip, int32_t opt_id)
 	cmd_comp.cmd = cmd;
 
 	cmd_comp.op_type = IRIS_PQUPDATE_OP;
-	rc = _iris_send_cmds(&cmd_comp, PATH_DSI);
+	if (pcfg->force_i2c_type)
+		rc = _iris_send_cmds(&cmd_comp, PATH_I2C);
+	else
+		rc = _iris_send_cmds(&cmd_comp, PATH_DSI);
 	kvfree(cmd);
 	return rc;
 }
@@ -2795,8 +2829,8 @@ static int _iris_send_dtsi_pkt(
 	return 0;
 }
 
-void iris_send_pkt(struct iris_ctrl_opt *arr, int seq_cnt,
-		struct iris_cmd_comp *pcmd_comp)
+void iris_send_pkt_with_path(struct iris_ctrl_opt *arr, int seq_cnt,
+		struct iris_cmd_comp *pcmd_comp, int path)
 {
 	int i = 0;
 	uint8_t ip = 0;
@@ -2810,9 +2844,9 @@ void iris_send_pkt(struct iris_ctrl_opt *arr, int seq_cnt,
 
 		/*lut table*/
 		if (_iris_is_lut(ip))
-			rc = _iris_send_lut_pkt(arr + i, pcmd_comp, false, PATH_DSI);
+			rc = _iris_send_lut_pkt(arr + i, pcmd_comp, false, path);
 		else
-			rc = _iris_send_dtsi_pkt(arr + i, pcmd_comp, PATH_DSI);
+			rc = _iris_send_dtsi_pkt(arr + i, pcmd_comp, path);
 
 		if (rc)
 			IRIS_LOGE("%s(), [FATAL ERROR] invalid i_p: %0x opt: %0x", __func__, ip, opt_id);
@@ -2825,7 +2859,21 @@ void iris_send_assembled_pkt(struct iris_ctrl_opt *arr, int seq_cnt)
 
 	_iris_update_cmds(&cmd_comp, IRIS_CMD_SET_STATE_HS, IRIS_LIGHTUP_OP);
 
-	iris_send_pkt(arr, seq_cnt, &cmd_comp);
+	iris_send_pkt_with_path(arr, seq_cnt, &cmd_comp, PATH_DSI);
+}
+
+void iris_send_assembled_pkt_mtk(void *handle, struct iris_ctrl_opt *arr, int seq_cnt)
+{
+	struct iris_cmd_comp cmd_comp;
+	int path = PATH_I2C;
+
+	_iris_update_cmds(&cmd_comp, IRIS_CMD_SET_STATE_HS, IRIS_LIGHTUP_OP);
+	//for special usage
+	cmd_comp.handle = handle;
+
+	path = (iris_is_pt_mode(false)) ? PATH_DSI : PATH_I2C;
+
+	iris_send_pkt_with_path(arr, seq_cnt, &cmd_comp, path);
 }
 
 void _iris_send_lightup_pkt(void)
@@ -3349,11 +3397,18 @@ static void _iris_send_update_opt(
 	int32_t ip = 0;
 	int32_t rc = 0;
 	struct iris_ctrl_opt ctrl_opt;
+	struct iris_cfg *pcfg = iris_get_cfg();
 
 	ip = popt->ip;
 	ctrl_opt.ip = popt->ip;
 	ctrl_opt.opt_id = popt->opt_new;
 	ctrl_opt.chain = popt->chain;
+
+	/* For video mode, sending cmd by MIPI may cause black screen issue. */
+	if (pcfg->force_i2c_type) {
+		path = PATH_I2C;
+		IRIS_LOGD("%s(), use I2C type to send [%02x %02x].", __func__, ip, ctrl_opt.opt_id);
+	}
 
 	/*speical deal with lut table*/
 	if (_iris_is_lut(ip))
@@ -3903,6 +3958,7 @@ int pw_dbgfs_cont_splash_init(void *display)
 	}
 
 	debugfs_create_u32("ocp_read_by_i2c", 0644, pcfg->dbg_root, &pcfg->ocp_read_by_i2c);
+	debugfs_create_u32("ocp_write_by_i2c", 0644, pcfg->dbg_root, &pcfg->ocp_read_by_i2c);
 
 	debugfs_create_u32("iris_generate_frc_cmd_list", 0644, pcfg->dbg_root, (u32 *)&iris_generate_frc_cmd_list);
 

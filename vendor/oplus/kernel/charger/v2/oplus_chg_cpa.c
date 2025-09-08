@@ -367,6 +367,7 @@ static int oplus_cpa_request_lock_vote_callback(struct votable *votable,
 						const char *client, bool step)
 {
 	struct oplus_cpa *cpa = data;
+	int rc;
 
 	if (votable == NULL) {
 		chg_err("votable is NUL\n");
@@ -403,7 +404,10 @@ static int oplus_cpa_request_lock_vote_callback(struct votable *votable,
 	mutex_lock(&cpa->cpa_request_lock);
 	cpa->def_req = true;
 	chg_info("start request default protocol\n");
-	protocol_identify_request(cpa, cpa->default_protocol_type);
+	rc = protocol_identify_request(cpa, cpa->default_protocol_type);
+	/* If setting protocol_to_be_switched fails, def_req should be set to false */
+	if (rc < 0 && rc != -EBUSY)
+		cpa->def_req = false;
 	mutex_unlock(&cpa->cpa_request_lock);
 
 	return 0;
@@ -669,7 +673,10 @@ static void oplus_cpa_chg_type_change_work(struct work_struct *work)
 					mutex_lock(&cpa->cpa_request_lock);
 					cpa->def_req = true;
 					chg_info("start request default protocol\n");
-					protocol_identify_request(cpa, cpa->default_protocol_type);
+					rc = protocol_identify_request(cpa, cpa->default_protocol_type);
+					/* If setting protocol_to_be_switched fails, def_req should be set to false */
+					if (rc < 0 && rc != -EBUSY)
+						cpa->def_req = false;
 					mutex_unlock(&cpa->cpa_request_lock);
 				}
 				break;
@@ -1247,6 +1254,22 @@ static int oplus_cpa_update_timeout(struct oplus_mms *mms, union mms_msg_data *d
 	return 0;
 }
 
+static int oplus_cpa_update_power(struct oplus_mms *mms, union mms_msg_data *data)
+{
+	if (mms == NULL) {
+		chg_err("mms is NULL");
+		return -EINVAL;
+	}
+	if (data == NULL) {
+		chg_err("data is NULL");
+		return -EINVAL;
+	}
+
+	data->intval = oplus_cpa_get_actual_used_power(mms);
+
+	return 0;
+}
+
 static void oplus_cpa_update(struct oplus_mms *mms, bool publish)
 {
 }
@@ -1268,6 +1291,12 @@ static struct mms_item oplus_cpa_item[] = {
 		.desc = {
 			.item_id = CPA_ITEM_TIMEOUT,
 			.update = oplus_cpa_update_timeout,
+		}
+	},
+	{
+		.desc = {
+			.item_id = CPA_ITEM_POWER,
+			.update = oplus_cpa_update_power,
 		}
 	},
 };
@@ -1858,6 +1887,8 @@ void oplus_cpa_protocol_add_type(struct protocol_map *map, int type)
 int oplus_cpa_protocol_set_power(struct oplus_mms *topic, enum oplus_chg_protocol_type type, int power_mw)
 {
 	struct oplus_cpa *cpa;
+	struct mms_msg *msg;
+	int rc = 0;
 	int i;
 
 	if (topic == NULL) {
@@ -1875,6 +1906,18 @@ int oplus_cpa_protocol_set_power(struct oplus_mms *topic, enum oplus_chg_protoco
 			if (power_mw > cpa->protocol_prio_table[i].max_power_mw)
 				power_mw = cpa->protocol_prio_table[i].max_power_mw;
 			cpa->protocol_prio_table[i].power_mw = power_mw;
+
+			msg = oplus_mms_alloc_msg(MSG_TYPE_ITEM, MSG_PRIO_MEDIUM, CPA_ITEM_POWER);
+			if (msg == NULL) {
+				chg_err("alloc msg error\n");
+			} else {
+				rc = oplus_mms_publish_msg(cpa->cpa_topic, msg);
+				if (rc < 0) {
+					chg_err("publish cpa power msg error, rc=%d\n", rc);
+					kfree(msg);
+				}
+			}
+
 			return 0;
 		}
 	}

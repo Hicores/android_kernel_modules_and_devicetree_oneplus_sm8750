@@ -43,6 +43,7 @@ extern void tcpc_late_sync(void);
 #define UPM7610_DRV_VERSION	"2.0.6_MTK"
 
 #define UPM7610_IRQ_WAKE_TIME	(500) /* ms */
+#define UPM7610_DEINIT_TIME		(500) /* ms */
 
 struct upm7610_chip {
 	struct i2c_client *client;
@@ -353,6 +354,7 @@ static inline int upm7610_software_reset(struct tcpc_device *tcpc)
 	rt_regmap_cache_reload(chip->m_dev);
 #endif /* CONFIG_RT_REGMAP */
 	usleep_range(1000, 2000);
+	upm7610_i2c_write8(tcpc, UPM7610_REG_RESET_CTRL, MASK_EXT_STATUS);
 	return 0;
 }
 
@@ -375,7 +377,6 @@ static int upm7610_init_alert_mask(struct tcpc_device *tcpc)
 			| TCPC_V10_REG_ALERT_RX_HARD_RST
 			| TCPC_V10_REG_ALERT_RX_STATUS
 			| TCPC_V10_REG_RX_OVERFLOW
-			| TCPC_V10_REG_EXTENDED_STATUS
 			| TCPC_V10_REG_VBUS_SINK_DISCONNECT
 			| TCPC_V10_REG_ALERT_VENDOR_DEFINED;
 #endif
@@ -424,7 +425,6 @@ static int upm7610_init_up_mask(struct tcpc_device *tcpc)
 {
 	uint8_t up_mask = 0;
 
-	up_mask |= UPM7610_REG_VSAFE0V_STATUS_MASK;
 	up_mask |= UPM7610_REG_REF_DISCNT_MASK;
 #ifdef CONFIG_TYPEC_CAP_RA_DETACH
 	if (tcpc->tcpc_flags & TCPC_FLAGS_CHECK_RA_DETACH)
@@ -878,9 +878,7 @@ static int upm7610_tcpc_deinit(struct tcpc_device *tcpc)
 #ifdef CONFIG_TCPC_SHUTDOWN_CC_DETACH
 	upm7610_set_cc(tcpc, TYPEC_CC_DRP);
 	upm7610_set_cc(tcpc, TYPEC_CC_OPEN);
-	mdelay(20);
-	upm7610_set_cc(tcpc, TYPEC_CC_RD);
-	mdelay(10);
+	msleep(UPM7610_DEINIT_TIME);
 #else
 	upm7610_i2c_write8(tcpc, UPM7610_REG_RESET_CTRL, 1);
 #endif	/* CONFIG_TCPC_SHUTDOWN_CC_DETACH */
@@ -923,7 +921,6 @@ static int upm7610_get_message(struct tcpc_device *tcpc, uint32_t *payload,
 	struct upm7610_chip *chip = tcpc_get_dev_data(tcpc);
 	int rv = 0;
 	uint8_t cnt = 0, buf[4];
-	const uint16_t alert_rx = TCPC_V10_REG_ALERT_RX_STATUS|TCPC_V10_REG_RX_OVERFLOW;
 
 	rv = upm7610_block_read(chip->client, TCPC_V10_REG_RX_BYTE_CNT, 4, buf);
 	if (rv < 0)
@@ -942,9 +939,6 @@ static int upm7610_get_message(struct tcpc_device *tcpc, uint32_t *payload,
 				       payload);
 	}
 
-	/* Read complete, clear RX status alert bit */
-	if (*msg_head != 0x77a3)
-		tcpci_alert_status_clear(tcpc, alert_rx);
 	return rv;
 }
 
@@ -1234,6 +1228,8 @@ static inline int upm7610_check_revision(struct i2c_client *client)
 	if (ret < 0)
 		return ret;
 
+	data = MASK_EXT_STATUS;
+	ret = upm7610_write_device(client, UPM7610_REG_RESET_CTRL, 1, &data);
 	usleep_range(1000, 2000);
 
 	ret = upm7610_read_device(client, TCPC_V10_REG_DID, 2, &did);
@@ -1355,8 +1351,10 @@ static void upm7610_shutdown(struct i2c_client *client)
 
 	/* Please reset IC here */
 	if (chip != NULL) {
-		if (chip->irq)
+		if (chip->irq) {
+			disable_irq(chip->irq);
 			tcpm_shutdown(chip->tcpc);
+		}
 	} else {
 		i2c_smbus_write_byte_data(client, UPM7610_REG_RESET_CTRL, 0x01);
 		i2c_smbus_write_byte_data(client, UPM7610_REG_CC_CTRL, 0x44);

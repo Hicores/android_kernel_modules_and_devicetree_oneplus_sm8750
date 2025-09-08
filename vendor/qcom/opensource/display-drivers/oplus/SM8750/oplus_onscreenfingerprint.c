@@ -323,6 +323,12 @@ int oplus_ofp_init(void *dsi_panel)
 		OFP_INFO("aod_off_frame_cost:%d\n", panel->oplus_panel.aod_off_frame_cost);
 	}
 
+	/* parse video mode aod brightness config */
+	rc = oplus_panel_parse_video_mode_aod_brightness_config(panel);
+	if (rc) {
+		OFP_ERR("failed to parse video mode aod brightness config, rc=%d\n", rc);
+	}
+
 	if (!strcmp(panel->type, "secondary")) {
 		/* set default display id to primary display */
 		oplus_ofp_set_display_id(OPLUS_OFP_PRIMARY_DISPLAY);
@@ -625,10 +631,16 @@ int oplus_ofp_property_update(void *sde_connector, void *sde_connector_state, in
 	struct sde_connector *c_conn = sde_connector;
 	struct sde_connector_state *c_state = sde_connector_state;
 	struct oplus_ofp_params *p_oplus_ofp_params = oplus_ofp_get_params(oplus_ofp_display_id);
+	struct dsi_display *display = oplus_display_get_current_display();
 
 	OFP_DEBUG("start\n");
 
 	if (!c_conn || !c_state || !p_oplus_ofp_params) {
+		OFP_ERR("Invalid params\n");
+		return -EINVAL;
+	}
+
+	if (!display || !display->panel) {
 		OFP_ERR("Invalid params\n");
 		return -EINVAL;
 	}
@@ -646,6 +658,13 @@ int oplus_ofp_property_update(void *sde_connector, void *sde_connector_state, in
 			OFP_INFO("HBM_ENABLE:%llu,dim:%llu,fingerpress:%llu,icon:%llu,aod:%llu\n", prop_val, (prop_val & OPLUS_OFP_PROPERTY_DIM_LAYER),
 				(prop_val & OPLUS_OFP_PROPERTY_FINGERPRESS_LAYER), (prop_val & OPLUS_OFP_PROPERTY_ICON_LAYER),
 					(prop_val & OPLUS_OFP_PROPERTY_AOD_LAYER));
+
+			if (prop_val & OPLUS_OFP_PROPERTY_ICON_LAYER) {
+				atomic_set(&display->panel->oplus_panel.esd_pending, true);
+			} else {
+				atomic_set(&display->panel->oplus_panel.esd_pending, false);
+			}
+			OFP_INFO("oplus_ofp_fp_press set esd_pending:%d\n", atomic_read(&display->panel->oplus_panel.esd_pending));
 		}
 		p_oplus_ofp_params->hbm_enable = prop_val;
 		OPLUS_OFP_TRACE_INT("oplus_ofp_hbm_enable", p_oplus_ofp_params->hbm_enable);
@@ -2098,9 +2117,18 @@ int oplus_ofp_hbm_handle(void *sde_encoder_virt)
 			|| hbm_enable & OPLUS_OFP_PROPERTY_FINGERPRESS_LAYER) && bl_level)
 				|| (p_oplus_ofp_params->doze_active && (hbm_enable & OPLUS_OFP_PROPERTY_FINGERPRESS_LAYER)
 					&& bl_level && !(oplus_ofp_video_mode_30hz_aod_is_enabled() && (refresh_rate == 30)))) {
-		rc = oplus_ofp_set_panel_hbm(c_conn, true);
-		if (rc) {
-			OFP_ERR("failed to set panel hbm on\n");
+		if (oplus_ofp_video_mode_30hz_aod_is_enabled()) {
+			if (refresh_rate == 120) {
+				rc = oplus_ofp_set_panel_hbm(c_conn, true);
+				if (rc) {
+					OFP_ERR("failed to set panel hbm on\n");
+				}
+			 }
+		} else {
+			rc = oplus_ofp_set_panel_hbm(c_conn, true);
+			if (rc) {
+				OFP_ERR("failed to set panel hbm on\n");
+			}
 		}
 	} else if ((!(hbm_enable & OPLUS_OFP_PROPERTY_DIM_LAYER)
 					&& !(hbm_enable & OPLUS_OFP_PROPERTY_FINGERPRESS_LAYER))
@@ -3510,6 +3538,155 @@ void oplus_ofp_video_mode_refresh_flag_update(void *dsi_display_mode)
 	return;
 }
 
+int oplus_panel_parse_video_mode_aod_brightness_config(struct dsi_panel *panel)
+{
+	struct oplus_ofp_params *p_oplus_ofp_params = oplus_ofp_get_params(oplus_ofp_display_id);
+	int rc = 0;
+	u32 tmp = 0;
+	u32 count = 0;
+	u32 i = 0, test_len = 0;
+	u32 groups = 0;
+	u8 regs_rlen[PANEL_REGS_CHECK_NUM_MAX];
+	u8 *check_value = NULL;
+	const u32 *arr = NULL;
+	struct property *data = NULL;
+	struct dsi_parser_utils *utils = NULL;
+
+	if (!panel) {
+		OPLUS_DSI_ERR("Invalid Params\n");
+		return  -EINVAL;
+	}
+
+	utils = &panel->utils;
+
+	p_oplus_ofp_params->video_mode_aod_brightness_change_enable = utils->read_bool(utils->data,
+			"oplus,video-mode-aod-brightness-change-enable");
+	OPLUS_DSI_INFO("oplus,video-mode-aod-brightness-change-enable: %s\n",
+			p_oplus_ofp_params->video_mode_aod_brightness_change_enable ? "true" : "false");
+
+	if (!p_oplus_ofp_params->video_mode_aod_brightness_change_enable) {
+		OPLUS_DSI_INFO("video mode aod brightness change disable!\n");
+		return rc;
+	}
+
+	arr = utils->get_property(utils->data, "oplus,video-mode-aod-brightness-value-count", &count);
+	if (!arr) {
+		OPLUS_DSI_ERR("oplus,video-mode-aod-brightness-value-count parsing failed!\n");
+		rc = -EINVAL;
+		goto error;
+	}
+	memcpy(regs_rlen, arr, count);
+
+	for (i = 0; i < count; ++i) {
+		test_len += regs_rlen[i];
+	}
+	if (!test_len) {
+		rc = -EINVAL;
+		goto error;
+	}
+	if (VIDEO_AOD_BRIGHTNESS_VALUE_COUNT < test_len) {
+		OPLUS_DSI_ERR("oplus,video-mode-aod-brightness-value-count = %d out of VIDEO_AOD_BRIGHTNESS_VALUE_COUNT = %d!\n",
+				test_len, VIDEO_AOD_BRIGHTNESS_VALUE_COUNT);
+		rc = -EINVAL;
+		goto error;
+	} else {
+		p_oplus_ofp_params->video_mode_aod_brightness_value_count = test_len;
+	}
+
+	data = utils->find_property(utils->data, "oplus,video-mode-aod-low-brightness-value", &tmp);
+	tmp /= sizeof(u8);
+	if (!IS_ERR_OR_NULL(data) && tmp != 0 && (tmp % test_len) == 0) {
+		groups = tmp / test_len;
+	} else {
+		OPLUS_DSI_ERR("error parse aod_brightness_value!\n");
+		rc = -EINVAL;
+		goto error;
+	}
+
+	check_value = kzalloc(sizeof(u32) * test_len * groups, GFP_KERNEL);
+	if (!check_value) {
+		rc = -ENOMEM;
+		goto error1;
+	}
+
+	arr = utils->get_property(utils->data, "oplus,video-mode-aod-low-brightness-value", &count);
+	if (!arr || (count != groups * test_len)) {
+		OPLUS_DSI_ERR("error reading oplus,video-mode-aod-low-brightness-value\n");
+		memset(check_value, 0, groups * test_len);
+		rc = -EINVAL;
+		goto error1;
+	}
+	memcpy(check_value, arr, count);
+
+	for (i = 0; i < groups * test_len; i++) {
+		p_oplus_ofp_params->video_mode_aod_low_brightness_values[i] = (check_value)[i];
+		OPLUS_DSI_INFO("video_mode_aod_low_brightness_values[%d] == 0x%.2X\n",
+				i, p_oplus_ofp_params->video_mode_aod_low_brightness_values[i]);
+	}
+
+	arr = utils->get_property(utils->data, "oplus,video-mode-aod-high-brightness-value", &count);
+	if (!arr || (count != groups * test_len)) {
+		OPLUS_DSI_ERR("error reading oplus,video-mode-aod-high-brightness-value\n");
+		memset(check_value, 0, groups * test_len);
+		rc = -EINVAL;
+		goto error1;
+	}
+	memcpy(check_value, arr, count);
+
+	for (i = 0; i < groups * test_len; i++) {
+		p_oplus_ofp_params->video_mode_aod_high_brightness_values[i] = (check_value)[i];
+		OPLUS_DSI_INFO("video_mode_aod_high_brightness_values[%d] == 0x%.2X\n",
+				i, p_oplus_ofp_params->video_mode_aod_high_brightness_values[i]);
+	}
+
+error1:
+	kfree(check_value);
+error:
+	return rc;
+}
+
+void oplus_ofp_video_mode_aod_brightness_change(struct dsi_panel *panel)
+{
+	char *tx_buf;
+	u32 i = 0;
+	struct dsi_panel_cmd_set custom_cmd_set;
+	struct oplus_ofp_params *p_oplus_ofp_params = oplus_ofp_get_params(oplus_ofp_display_id);
+
+	OFP_DEBUG("start\n");
+	if (!panel) {
+		DSI_ERR("invalid params\n");
+		return;
+	}
+
+	OPLUS_OFP_TRACE_BEGIN("oplus_ofp_video_mode_aod_handle");
+
+	custom_cmd_set = panel->cur_mode->priv_info->cmd_sets[DSI_CMD_SET_LP1];
+	for (i = 0; i < custom_cmd_set.count; i++) {
+		tx_buf = (char*)custom_cmd_set.cmds[i].msg.tx_buf;
+		if (tx_buf[0] == 0x51)
+			break;
+	}
+
+	if (p_oplus_ofp_params->aod_light_mode) {
+		if (tx_buf[0] == 0x51) {
+			for (i = 0; i < p_oplus_ofp_params->video_mode_aod_brightness_value_count; i++)
+				tx_buf[i+1] = p_oplus_ofp_params->video_mode_aod_low_brightness_values[i];
+		} else {
+			OFP_ERR("invaild format of cmd %s, tx_buf[0] = 0x%.2X\n", cmd_set_prop_map[DSI_CMD_SET_LP1], tx_buf[0]);
+		}
+	} else {
+		if (tx_buf[0] == 0x51) {
+			for (i = 0; i < p_oplus_ofp_params->video_mode_aod_brightness_value_count; i++)
+				tx_buf[i+1] = p_oplus_ofp_params->video_mode_aod_high_brightness_values[i];
+		} else {
+			OFP_ERR("invaild format of cmd %s, tx_buf[0] = 0x%.2X\n", cmd_set_prop_map[DSI_CMD_SET_LP1], tx_buf[0]);
+		}
+	}
+
+	OPLUS_OFP_TRACE_END("oplus_ofp_video_mode_aod_handle");
+	OFP_DEBUG("end\n");
+}
+
 int oplus_ofp_video_mode_aod_handle(void *sde_encoder_virt)
 {
 	int rc = 0;
@@ -3576,16 +3753,14 @@ int oplus_ofp_video_mode_aod_handle(void *sde_encoder_virt)
 		}
 		oplus_ofp_set_aod_state(true);
 		/*set aod on*/
+
+		/* When enter AOD, brightness set by LP1 cmd, so AOD brightness need change by light sensor*/
+		if (p_oplus_ofp_params->video_mode_aod_brightness_change_enable)
+			oplus_ofp_video_mode_aod_brightness_change(display->panel);
+
 		rc = dsi_panel_set_lp1(display->panel);
 		if (rc) {
 			OFP_ERR("[%s] failed to send DSI_CMD_SET_LP1 cmds, rc=%d\n", display->name, rc);
-		}
-
-		if (p_oplus_ofp_params->aod_light_mode) {
-			rc = oplus_ofp_display_cmd_set(display, DSI_CMD_AOD_LOW_LIGHT_MODE);
-			if (rc) {
-				OFP_ERR("[%s] failed to send DSI_CMD_AOD_LOW_LIGHT_MODE cmds, rc=%d\n", display->name, rc);
-			}
 		}
 		oplus_ofp_refresh_flag = OPLUS_OFP_VIDEO_AOD_STATE_BASE;
 	} else if (oplus_ofp_get_aod_state() && (refresh_rate != 30)) {

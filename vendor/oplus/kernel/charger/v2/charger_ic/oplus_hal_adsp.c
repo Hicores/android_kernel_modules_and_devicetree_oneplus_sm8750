@@ -5256,6 +5256,9 @@ static void oplus_plugin_irq_work(struct work_struct *work)
 	if (usb_pre_plugin_status != usb_plugin_status || !usb_plugin_status) {
 		oplus_chg_suspend_charger(false, PD_PDO_ICL_VOTER);
 		oplus_chg_ic_virq_trigger(bcdev->buck_ic, OPLUS_IC_VIRQ_PLUGIN);
+		if (bcdev->qcom_gauge_cali_track_support &&
+		    usb_pre_plugin_status != usb_plugin_status)
+			schedule_work(&bcdev->gauge_cali_track_by_plug_work);
 	}
 	if (usb_pre_plugin_status != usb_plugin_status && !usb_pre_plugin_status)
 		bcdev->read_by_reg = 0;
@@ -5753,9 +5756,24 @@ static bool fg_sm8350_get_battery_hmac(struct battery_chg_dev *bcdev)
 	return pst->prop[BATT_BATTERY_HMAC];
 }
 
-static void fg_sm8350_set_battery_full(bool full)
+static int fg_sm8350_set_battery_full(struct oplus_chg_ic_dev *ic_dev, bool full)
 {
-	/*Do nothing*/
+	int rc = 0;
+	struct battery_chg_dev *bcdev;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+
+	bcdev = oplus_chg_ic_get_drvdata(ic_dev);
+	if (!bcdev)
+		return -ENODEV;
+
+	if(full && bcdev->qcom_gauge_cali_track_support)
+		schedule_work(&bcdev->gauge_cali_track_by_full_work);
+
+	return rc;
 }
 /*
 static int fg_sm8350_get_prev_battery_mvolts(void)
@@ -6159,7 +6177,234 @@ static int oplus_chg_ssr_notifier_cb(struct notifier_block *nb,
 
 	return NOTIFY_DONE;
 }
+
+#define QCOM_PLATFORM_FG_TRACK_VER "1.0"
+#define OPLUS_GAUGE_CYCLE_COUNT_JUMP_ERR_NUM 3
+#define OPLUS_GAUGE_CALI_TRACK_PLUG_TIME_THD_MS (2 * 60 * 1000)
+enum oplus_track_item_idx {
+	TRACK_ITEM_START = 0,
+	TRACK_PRE_VBAT = TRACK_ITEM_START,
+	TRACK_CUR_VBAT,
+	TRACK_PRE_TBAT,
+	TRACK_CUR_TBAT,
+	TRACK_PRE_SOC,
+	TRACK_CUR_SOC,
+	TRACK_BATT_CC,
+	TRACK_PRE_LEARN_CAPACITY,
+	TRACK_CUR_LEARN_CAPACITY,
+	TRACK_PRE_IMP,
+	TRACK_CUR_IMP,
+	TRACK_PRE_SOH,
+	TRACK_CUR_SOH,
+	TRACK_ITEM_END
+};
+
+const static unsigned int oplus_chg_track_pattern[] = {
+	/*plugout*/
+	[GAUGE_TRACK_CALI_FLAG_PLUGOUT] =
+		BIT(TRACK_PRE_VBAT)            | BIT(TRACK_CUR_VBAT)   | BIT(TRACK_PRE_TBAT)      | BIT(TRACK_CUR_TBAT)           |
+		BIT(TRACK_PRE_SOC)             | BIT(TRACK_CUR_SOC)    | BIT(TRACK_BATT_CC)       | BIT(TRACK_PRE_LEARN_CAPACITY) |
+		BIT(TRACK_CUR_LEARN_CAPACITY)  | BIT(TRACK_PRE_IMP)    | BIT(TRACK_CUR_IMP)       | BIT(TRACK_PRE_SOH)            |
+		BIT(TRACK_CUR_SOH),
+
+	/*full*/
+	[GAUGE_TRACK_CALI_FLAG_CHG_FULL] =
+		BIT(TRACK_PRE_VBAT)            | BIT(TRACK_CUR_VBAT)   | BIT(TRACK_PRE_TBAT)      | BIT(TRACK_CUR_TBAT)           |
+		BIT(TRACK_PRE_SOC)             | BIT(TRACK_CUR_SOC)    | BIT(TRACK_BATT_CC)       | BIT(TRACK_PRE_LEARN_CAPACITY) |
+		BIT(TRACK_CUR_LEARN_CAPACITY)  | BIT(TRACK_PRE_IMP)    | BIT(TRACK_CUR_IMP)       | BIT(TRACK_PRE_SOH)            |
+		BIT(TRACK_CUR_SOH)
+};
+
+static int oplus_plat_cali_info_item_to_val(struct gauge_track_cali_info_s *info,
+	enum oplus_track_item_idx idx)
+{
+	switch (idx) {
+	case TRACK_PRE_VBAT:
+	case TRACK_CUR_VBAT:
+		return info->vbat;
+	case TRACK_PRE_TBAT:
+	case TRACK_CUR_TBAT:
+		return info->tbat;
+	case TRACK_PRE_SOC:
+	case TRACK_CUR_SOC:
+		return info->soc;
+	case TRACK_BATT_CC:
+		return info->cycle_count;
+	case TRACK_PRE_LEARN_CAPACITY:
+	case TRACK_CUR_LEARN_CAPACITY:
+		return info->learn_capacity;
+	case TRACK_PRE_IMP:
+	case TRACK_CUR_IMP:
+		return info->imp;
+	case TRACK_PRE_SOH:
+	case TRACK_CUR_SOH:
+		return info->soh;
+	default:
+		return 0;
+	}
+	return 0;
+}
+
+static int oplus_plat_cali_info(struct gauge_track_cali_info_s *pre,
+	struct gauge_track_cali_info_s *cur, int reason, char *buf)
+{
+	int i;
+	int index = 0;
+	int offset = 0;
+	unsigned int pattern;
+
+	pattern = oplus_chg_track_pattern[reason];
+	index = scnprintf(buf, OPLUS_CHG_TRACK_PLAT_CALI_INFO_LEN,
+			"$$track_reason@@%d$$err_scene@@%s$$info_ver@@%s$$qcom_info@@(",
+			reason, "gauge_cali", QCOM_PLATFORM_FG_TRACK_VER);
+	for (i = TRACK_ITEM_START; i < TRACK_ITEM_END; i++) {
+		if (i != TRACK_ITEM_START)
+			index += scnprintf(buf + index, OPLUS_CHG_TRACK_PLAT_CALI_INFO_LEN - index, ",");
+		if((pattern & BIT(i)) == 0)
+			continue;
+
+		if (i == TRACK_BATT_CC) {
+			offset++;
+			index += scnprintf(buf + index, OPLUS_CHG_TRACK_PLAT_CALI_INFO_LEN - index,
+				"%d", oplus_plat_cali_info_item_to_val(cur, i));
+			continue;
+		}
+		if ((offset + i) % 2 == 0)
+			index += scnprintf(buf + index, OPLUS_CHG_TRACK_PLAT_CALI_INFO_LEN - index,
+				"%d", oplus_plat_cali_info_item_to_val(pre, i));
+		else
+			index += scnprintf(buf + index, OPLUS_CHG_TRACK_PLAT_CALI_INFO_LEN - index,
+				"%d", oplus_plat_cali_info_item_to_val(cur, i));
+	}
+	index += scnprintf(buf + index, OPLUS_CHG_TRACK_PLAT_CALI_INFO_LEN - index, ")");
+
+	if (index > OPLUS_CHG_TRACK_PLAT_CALI_INFO_LEN) {
+		chg_err("track info exceeds length limit.");
+		return -EINVAL;
+	}
+
+	return index;
+}
+
+static int oplus_plat_trigger_gauge_cali_track(struct gauge_track_cali_info_s *pre_info,
+	struct gauge_track_cali_info_s *cur_info, int reason)
+{
+	char *buf = NULL;
+	int len = 0;
+	struct battery_chg_dev *bcdev = g_bcdev;
+
+	chg_info("trigger reason:%d\n", reason);
+
+	if (bcdev == NULL)
+		return -EINVAL;
+
+	buf = kzalloc(OPLUS_CHG_TRACK_PLAT_CALI_INFO_LEN, GFP_KERNEL);
+	if (buf == NULL) {
+		chg_err("buf alloc error.\n");
+		return -ENOMEM;
+	}
+
+	len = oplus_plat_cali_info(pre_info, cur_info, reason, buf);
+
+	if (len > 0) {
+		oplus_chg_ic_creat_err_msg(bcdev->gauge_ic, OPLUS_IC_ERR_GAUGE, TRACK_GAGUE_QCOM_CALI_INFO, buf);
+		oplus_chg_ic_virq_trigger(bcdev->gauge_ic, OPLUS_IC_VIRQ_ERR);
+	}
+	kfree(buf);
+	return 0;
+}
+
+static void oplus_chg_update_gauge_cali_track_info_internal(struct battery_chg_dev *bcdev,
+	struct gauge_track_cali_info_s *info)
+{
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_BATTERY];
+	int rc = 0;
+
+	if (bcdev == NULL || info == NULL || pst == NULL) {
+		chg_err("input is null\n");
+		return;
+	}
+
+	oem_read_buffer(bcdev);
+	rc = read_property_id(bcdev, pst, BATT_RESISTANCE);
+	if (rc < 0)
+		chg_err("get r_final_total fail, rc=%d\n", rc);
+
+	info->tbat = bcdev->read_buffer_dump.data_buffer[0];
+	info->vbat = bcdev->read_buffer_dump.data_buffer[2];
+	info->soc = oplus_chg_get_battery_soc(bcdev);
+	info->cycle_count = bcdev->read_buffer_dump.data_buffer[7];
+	info->learn_capacity = bcdev->read_buffer_dump.data_buffer[6];
+	info->imp = pst->prop[BATT_RESISTANCE];
+	info->soh = bcdev->read_buffer_dump.data_buffer[8];
+}
+
+static bool oplus_plat_gauge_cali_changed(struct gauge_track_cali_info_s *pre_info,
+					  struct gauge_track_cali_info_s *cur_info)
+{
+	if ((pre_info->cycle_count - cur_info->cycle_count) > OPLUS_GAUGE_CYCLE_COUNT_JUMP_ERR_NUM ||
+	    (pre_info->learn_capacity != cur_info->learn_capacity) ||
+	    (pre_info->soh != cur_info->soh)) {
+		chg_info("guege_info: pre[%d %d %d %d %d %d %d], cur[%d %d %d %d %d %d %d]",
+			 pre_info->tbat, pre_info->vbat, pre_info->soc, pre_info->cycle_count,
+			 pre_info->learn_capacity, pre_info->imp, pre_info->soh,
+			 cur_info->tbat, cur_info->vbat, cur_info->soc, cur_info->cycle_count,
+                         cur_info->learn_capacity, cur_info->imp, cur_info->soh);
+		return true;
+	}
+	return false;
+}
+
+static struct gauge_track_cali_info_s pre_info;
+static struct gauge_track_cali_info_s cur_info;
+static void oplus_plat_gauge_cali_track_by_plug_work(struct work_struct *work)
+{
+	static ktime_t online_time;
+	struct battery_chg_dev *bcdev = container_of(work,
+		struct battery_chg_dev, gauge_cali_track_by_plug_work);
+
+	if (bcdev == NULL || bcdev->pre_info == NULL)
+		return;
+
+	if (bcdev->usb_in_status) {
+		online_time = ktime_get();
+		mutex_lock(&bcdev->pre_info_lock);
+		oplus_chg_update_gauge_cali_track_info_internal(bcdev, &pre_info);
+		mutex_unlock(&bcdev->pre_info_lock);
+		bcdev->pre_info = &pre_info;
+	} else {
+		if(ktime_ms_delta(ktime_get(), online_time) < OPLUS_GAUGE_CALI_TRACK_PLUG_TIME_THD_MS)
+			return;
+		mutex_lock(&bcdev->cur_info_lock);
+		oplus_chg_update_gauge_cali_track_info_internal(bcdev, &cur_info);
+		mutex_unlock(&bcdev->cur_info_lock);
+		if (oplus_plat_gauge_cali_changed(&pre_info, &cur_info)) {
+			oplus_plat_trigger_gauge_cali_track(&pre_info, &cur_info,
+							    GAUGE_TRACK_CALI_FLAG_PLUGOUT);
+			bcdev->pre_info = &cur_info;
+		}
+	}
+}
+
+static void oplus_plat_gauge_cali_track_by_full_work(struct work_struct *work)
+{
+	struct battery_chg_dev *bcdev = container_of(work,
+		struct battery_chg_dev, gauge_cali_track_by_full_work);
+
+	if (bcdev == NULL || bcdev->pre_info == NULL)
+		return;
+
+	mutex_lock(&bcdev->cur_info_lock);
+	oplus_chg_update_gauge_cali_track_info_internal(bcdev, &cur_info);
+	mutex_unlock(&bcdev->cur_info_lock);
+	if (oplus_plat_gauge_cali_changed(bcdev->pre_info, &cur_info)) {
+		oplus_plat_trigger_gauge_cali_track(bcdev->pre_info, &cur_info,
+						    GAUGE_TRACK_CALI_FLAG_CHG_FULL);
+		bcdev->pre_info = &cur_info;
+	}
+}
 #endif
+
 static int oplus_chg_8350_init(struct oplus_chg_ic_dev *ic_dev)
 {
 	ic_dev->online = true;
@@ -6191,6 +6436,10 @@ static int oplus_chg_8350_reg_dump(struct oplus_chg_ic_dev *ic_dev)
 	oplus_chg_8350_output_is_suspend(ic_dev, &chg_en);
 	oplus_chg_8350_get_charger_type(ic_dev, &chg_type);
 	oem_read_buffer(bcdev);
+	if (bcdev->qcom_gauge_cali_track_support != bcdev->read_buffer_dump.data_buffer[14]) {
+		bcdev->qcom_gauge_cali_track_support = bcdev->read_buffer_dump.data_buffer[14];
+		chg_info("update qcom_gauge_cali_track_support:%d", bcdev->qcom_gauge_cali_track_support);
+	}
 	chg_info("sm8450_st_dump: [chg_en=%d, suspend=%d, pd_svooc=%d], subtype=0x%02x],"
 			"[oplus_UsbCommCapable=%d, oplus_pd_svooc=%d, typec_mode=%d, cid_status=0x%02x, usb_in_status=%d],"
 			"[0x%4x=0x%02x, 0x%4x=0x%02x, 0x%4x=0x%02x, 0x%4x=0x%02x], "
@@ -6500,10 +6749,10 @@ static int oplus_chg_usb_set_input_current(struct battery_chg_dev *bcdev, int cu
 	for (i = 1; i <= current_ma / 100; i++) {
 		rc = write_property_id(bcdev, pst, prop_id, i * 100000);
 		if (rc) {
-			chg_err("set icl to %d mA fail, rc=%d\n", i * 100000, rc);
+			chg_err("set icl to %d mA fail, rc=%d\n", i * 100, rc);
 			return rc;
 		} else {
-			chg_err("set icl to %d mA\n", i * 100000);
+			chg_info("set icl to %d mA\n", i * 100);
 		}
 		usleep_range(50000, 51000);
 		if (qpnp_get_prop_vbus_collapse_status(bcdev) == true) {
@@ -6525,14 +6774,14 @@ static int oplus_chg_usb_set_input_current(struct battery_chg_dev *bcdev, int cu
 	if (pre_step) {
 		rc = write_property_id(bcdev, pst, prop_id, i * 100000);
 		if (rc) {
-			chg_err("set icl to %d mA fail, rc=%d\n", i * 100000, rc);
+			chg_err("set icl to %d mA fail, rc=%d\n", i * 100, rc);
 			return rc;
 		} else {
-			chg_err("set icl to %d mA\n", i * 100000);
+			chg_info("set icl to %d mA\n", i * 100);
 		}
 	}
 	chg_info("usb input max current limit aicl chg_vol=%d j[%d]=%d sw_aicl_point:%d aicl_end\n",
-		 chg_vol, i, i * 100000, aicl_point);
+		 chg_vol, i, i * 100, aicl_point);
 
 	return rc;
 }
@@ -8685,7 +8934,29 @@ struct oplus_chg_ic_virq oplus_chg_8350_buck_virq_table[] = {
 
 static int oplus_sm8350_init(struct oplus_chg_ic_dev *ic_dev)
 {
+	struct battery_chg_dev *bcdev;
+
+	if (ic_dev == NULL) {
+		chg_err("ic_dev null\n");
+		return -ENODEV;
+	}
+
 	ic_dev->online = true;
+	bcdev = oplus_chg_ic_get_drvdata(ic_dev);
+	if (!bcdev) {
+		chg_err("bcdev null\n");
+		return -ENODEV;
+	}
+
+	oem_read_buffer(bcdev);
+	bcdev->qcom_gauge_cali_track_support = bcdev->read_buffer_dump.data_buffer[14];
+	chg_info("qcom_gauge_cali_track_support = %d\n", bcdev->qcom_gauge_cali_track_support);
+
+	if (bcdev->qcom_gauge_cali_track_support) {
+		mutex_lock(&bcdev->pre_info_lock);
+		oplus_chg_update_gauge_cali_track_info_internal(bcdev, &pre_info);
+		mutex_unlock(&bcdev->pre_info_lock);
+	}
 
 	return 0;
 }
@@ -8876,9 +9147,7 @@ static int oplus_sm8350_get_batt_hmac(struct oplus_chg_ic_dev *ic_dev,
 static int oplus_sm8350_set_batt_full(struct oplus_chg_ic_dev *ic_dev,
 				       bool full)
 {
-	fg_sm8350_set_battery_full(full);
-
-	return 0;
+	return fg_sm8350_set_battery_full(ic_dev, full);
 }
 
 static int oplus_sm8350_update_dod0(struct oplus_chg_ic_dev *ic_dev)
@@ -11477,6 +11746,7 @@ static int battery_chg_probe(struct platform_device *pdev)
 	bcdev->adspfg_i2c_reset_processing = false;
 	bcdev->adspfg_i2c_reset_notify_done = false;
 	bcdev->pd_chg_volt = OPLUS_PD_5V;
+	bcdev->pre_info = &pre_info;
 #endif
 
 	bcdev->psy_list[PSY_TYPE_BATTERY].map = battery_prop_map;
@@ -11518,6 +11788,8 @@ static int battery_chg_probe(struct platform_device *pdev)
 	mutex_init(&bcdev->ufcs_read_buffer_lock);
 	init_completion(&bcdev->ufcs_read_ack);
 	mutex_init(&bcdev->ap_read_buffer_lock);
+	mutex_init(&bcdev->pre_info_lock);
+	mutex_init(&bcdev->cur_info_lock);
 	for (i = 0; i< AP_MESSAGE_MAX_SIZE; i++)
 		init_completion(&bcdev->ap_read_ack[i]);
 	mutex_init(&bcdev->ap_write_buffer_lock);
@@ -11532,6 +11804,8 @@ static int battery_chg_probe(struct platform_device *pdev)
 	INIT_WORK(&bcdev->subsys_up_work, battery_chg_subsys_up_work);
 	INIT_WORK(&bcdev->usb_type_work, battery_chg_update_usb_type_work);
 #ifdef OPLUS_FEATURE_CHG_BASIC
+	INIT_WORK(&bcdev->gauge_cali_track_by_plug_work, oplus_plat_gauge_cali_track_by_plug_work);
+	INIT_WORK(&bcdev->gauge_cali_track_by_full_work, oplus_plat_gauge_cali_track_by_full_work);
 	INIT_DELAYED_WORK(&bcdev->adsp_voocphy_status_work, oplus_adsp_voocphy_status_func);
 	INIT_DELAYED_WORK(&bcdev->unsuspend_usb_work, oplus_unsuspend_usb_work);
 	INIT_DELAYED_WORK(&bcdev->otg_init_work, oplus_otg_init_status_func);

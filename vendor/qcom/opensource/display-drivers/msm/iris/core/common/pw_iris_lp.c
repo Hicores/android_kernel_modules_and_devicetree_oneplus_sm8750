@@ -18,6 +18,7 @@
 #include "pw_iris_log.h"
 #include "pw_iris_i3c.h"
 #include "pw_iris_dts_fw.h"
+#include "pw_iris_memc_helper.h"
 #include <linux/kobject.h>
 #include <linux/delay.h>
 #include <linux/debugfs.h>
@@ -40,6 +41,8 @@ static int _debug_on_opt;
 bool _need_update_iris_for_qsync_in_pt;
 static bool _iris_hdr_power;
 static bool _iris_bsram_power; /* BSRAM domain power status */
+static uint8_t _iris_bsram_power_refcount; /* BSRAM domain power refcount */
+static uint8_t _iris_bsram_power_owner[IRIS_BSRAM_MAX];
 static bool _iris_frc_power;
 static bool _dpg_temp_disable;
 static bool _ulps_temp_disable;
@@ -643,7 +646,7 @@ int iris_pmu_pq_set(bool on)
 }
 
 /* power on & off bulksram domain */
-int iris_pmu_bsram_set(bool on, bool chain)
+int iris_pmu_bsram_set(bool on, bool chain, uint8_t bsram_owner_index)
 {
 	int rt = 0;
 	struct iris_cfg *pcfg;
@@ -655,27 +658,59 @@ int iris_pmu_bsram_set(bool on, bool chain)
 		return 0;
 	}
 	if (pcfg->iris_chip_type == CHIP_IRIS5) {
-		if (pcfg->pw_chip_func_ops.iris_pmu_bsram_set_i5_)
-			return pcfg->pw_chip_func_ops.iris_pmu_bsram_set_i5_(on);
-	}
-
-	if (on != _iris_bsram_power) {
-
-		if (on)
-			rt = iris_pmu_power_set(pcfg->bsram_pwr, on, 0);
-		else
-			rt = iris_pmu_power_set(pcfg->bsram_pwr, on, chain);
-
-		if (on) {
-			udelay(500);
-			if (chain)
-				iris_init_update_ipopt_t(IRIS_IP_SRAM, 0xa0, 0xa0, 1);
-			else
-				iris_send_ipopt_cmds(IRIS_IP_SRAM, 0xa0);
+		if (pcfg->pw_chip_func_ops.iris_pmu_bsram_set_i5_) {
+			if (on) {
+				if (_iris_bsram_power_refcount == 0)
+					rt = pcfg->pw_chip_func_ops.iris_pmu_bsram_set_i5_(on);
+				_iris_bsram_power_refcount++;
+			} else {
+				if (_iris_bsram_power_refcount == 0) {
+					IRIS_LOGE("Unbalanced pmu_bsram_set off\n");
+				} else {
+					_iris_bsram_power_refcount--;
+					if (_iris_bsram_power_refcount == 0)
+						rt = pcfg->pw_chip_func_ops.iris_pmu_bsram_set_i5_(on);
+				}
+			}
+			return rt;
 		}
 	}
-	IRIS_LOGI("%s: cur - %d, on - %d, rt - %d", __func__, _iris_bsram_power, on, rt);
-	_iris_bsram_power = on;
+
+	if (on) {
+		if (_iris_bsram_power_owner[bsram_owner_index] == 0) {
+			_iris_bsram_power_owner[bsram_owner_index] = 1;
+			if (_iris_bsram_power_refcount == 0) {
+				rt = iris_pmu_power_set(pcfg->bsram_pwr, on, 0);
+				_iris_bsram_power = on;
+
+				udelay(500);
+				if (chain)
+					iris_init_update_ipopt_t(IRIS_IP_SRAM, 0xa0, 0xa0, 1);
+				else
+					iris_send_ipopt_cmds(IRIS_IP_SRAM, 0xa0);
+			}
+			_iris_bsram_power_refcount++;
+		} else
+			IRIS_LOGI("%s: bsram_power_owner[%d] already on", __func__, bsram_owner_index);
+	} else {
+		if (_iris_bsram_power_refcount == 0) {
+			IRIS_LOGE("Unbalanced pmu_bsram_set off\n");
+		} else {
+			if (_iris_bsram_power_owner[bsram_owner_index] == 1) {
+				_iris_bsram_power_refcount--;
+				_iris_bsram_power_owner[bsram_owner_index] = 0;
+
+				if (_iris_bsram_power_refcount == 0) {
+					rt = iris_pmu_power_set(pcfg->bsram_pwr, on, chain);
+					_iris_bsram_power = on;
+				}
+			} else
+				IRIS_LOGI("%s: bsram_power_owner[%d] already off", __func__, bsram_owner_index);
+		}
+	}
+
+	IRIS_LOGI("%s: cur - %d, refcount - %d, on - %d, owner - %d", __func__,
+				_iris_bsram_power, _iris_bsram_power_refcount, on, bsram_owner_index);
 
 	return rt;
 }
@@ -922,7 +957,7 @@ static void _iris_abyp_ctrl_init(bool chain)
 
 	/* Set digital_bypass_a2i_en/digital_bypass_i2a_en = 1 for video mode */
 	if (pcfg->rx_mode == IRIS_VIDEO_MODE) {
-		regval.value |= 0x0C000000;
+		regval.value |= 0x0C100000;
 		if (pcfg->lp_ctrl.abyp_lp == 0)
 			regval.value |= 0x00100000;
 	}
@@ -1157,6 +1192,7 @@ enter_abyp_begin:
 #endif
 	pcfg->iris_pq_disable = 0;
 	pcfg->abyp_ctrl.abyp_failed = false;
+	pcfg->panel_backlight_in_pt = 0;
 	return rc;
 }
 
@@ -1188,15 +1224,64 @@ int iris_sys_pll_tx_phy_wa(void)
 	return rc;
 }
 
+static int _iris7p_lp_abyp_exit_video_pre(void)
+{
+	struct iris_cfg *pcfg;
+	int rc = 0;
+	int abp_ctrl = 0x0c80903f;
+	struct iris_mode_info timing_info;
+
+	pcfg = iris_get_cfg();
+
+	IRIS_LOGI("%s", __func__);
+
+	if (!pcfg || !pcfg->lightup_ops.obtain_cur_timing_info) {
+		IRIS_LOGE("Invalid inparms!, %s", __func__);
+		return 0;
+	}
+
+	if (pcfg->lightup_ops.obtain_cur_timing_info(&timing_info))
+		return 0;
+
+
+	// Update ABP switch parameter
+	if (timing_info.refresh_rate == IRIS_FPS_144)
+		abp_ctrl = 0x0c905073; // VDO_HS_LATENCY = 83, LP_WIDTH = 1
+	else if (timing_info.refresh_rate == IRIS_FPS_120)//for 120Hz
+		abp_ctrl = 0x0c90507b; // VDO_HS_LATENCY = 52, LP_WIDTH = 2
+	else {
+		IRIS_LOGE("%s(),%d: FPS(%d) not match(144/120).", __func__, __LINE__, timing_info.refresh_rate);
+		return -1;
+	}
+
+	if (pcfg->iris_i2c_write) {
+		rc = pcfg->iris_i2c_write(0xF0010004, abp_ctrl);
+		if (rc < 0) {
+			IRIS_LOGE("%s(),%d: failed to update ABP setting.", __func__, __LINE__);
+			return rc;
+		}
+	}
+	// Update DTG parameter
+	// Todo iris_update_dtg_settings();
+	if (pcfg->iris_chip_type == CHIP_IRIS7P) {
+		if (pcfg->rx_mode == IRIS_VIDEO_MODE) {
+			iris_exit_abyp_update_panel_ap_te(NULL, timing_info.refresh_rate);
+		}
+	}
+
+	return rc;
+}
+
 int iris_lp_abyp_exit(void)
 {
 	struct iris_cfg *pcfg;
-	int abyp_status_gpio;
+	int abyp_status_gpio = 0;
 	int toler_cnt = RETRY_MAX_CNT;
 	int rc = 0;
 	ktime_t lp_ktime0;
 
 	pcfg = iris_get_cfg();
+
 #ifdef IRIS_EXT_CLK
 	if (pcfg->iris_clk_set)
 		pcfg->iris_clk_set(true, false);
@@ -1246,6 +1331,9 @@ exit_abyp_loop:
 		iris_set_ipopt_payload_data(IRIS_IP_SYS, ID_SYS_DMA_GEN_CTRL2, 4, pcfg->default_dma_gen_ctrl_2);
 		IRIS_LOGD("Restore default setting %x  %x",  pcfg->default_dma_gen_ctrl, pcfg->default_dma_gen_ctrl_2);
 	}
+
+	if ((pcfg->rx_mode == IRIS_VIDEO_MODE) && (pcfg->iris_chip_type == CHIP_IRIS7P))
+		_iris7p_lp_abyp_exit_video_pre();
 
 	/* exit analog bypass */
 	iris_send_one_wired_cmd(IRIS_EXIT_ANALOG_BYPASS);
@@ -1315,6 +1403,7 @@ exit_abyp_loop:
 	}
 
 	pcfg->abyp_ctrl.abyp_failed = false;
+	pcfg->panel_backlight_in_pt = pcfg->bl_max_level;
 	return rc;
 }
 
@@ -1505,9 +1594,23 @@ static int getCadenceDiff120(long timeDiff)
 	return cadDiff;
 }
 
+static int getCadenceDiff144(long timeDiff)
+{
+	int cadDiff = 0;
+
+	while (1) {
+		if (timeDiff < (((cadDiff + 1) * 1000 / 144) - 2))
+			break;
+		cadDiff++;
+		if (cadDiff >= 15)
+			break;
+	}
+	return cadDiff;
+}
+
 static int getFrameDiff(long timeDiff)
 {
-	int panel_rate = 60;
+	int panel_rate = IRIS_FPS_60;
 	struct iris_cfg *pcfg = iris_get_cfg();
 	struct iris_mode_info timing_info;
 
@@ -1520,10 +1623,12 @@ static int getFrameDiff(long timeDiff)
 		return 0;
 
 	panel_rate = timing_info.refresh_rate;
-	if (panel_rate == 90)
+	if (panel_rate == IRIS_FPS_90)
 		return getCadenceDiff90(timeDiff);
-	else if (panel_rate == 120)
+	else if (panel_rate == IRIS_FPS_120)
 		return getCadenceDiff120(timeDiff);
+	else if (panel_rate == IRIS_FPS_144)
+		return getCadenceDiff144(timeDiff);
 	else
 		return getCadenceDiff60(timeDiff);
 
@@ -2207,8 +2312,13 @@ void iris_lp_setting_off(void)
 	pcfg->abyp_ctrl.preloaded = false;
 	pcfg->anim_state = 0;
 	_iris_bsram_power = false;
+	_iris_bsram_power_refcount = 0;
+	for (int i = 0; i < IRIS_BSRAM_MAX ;i++)
+		_iris_bsram_power_owner[i]  =  0;
+
 	_iris_frc_power = false;
-	iris_pmu_power_set(pcfg->bsram_pwr, 0, 1);
+	if (!pcfg->disable_dtg_eco)
+		iris_pmu_power_set(pcfg->bsram_pwr, 0, 1);
 	iris_pmu_power_set(pcfg->frc_pwr, 0, 1);
 	if (pcfg->iris_chip_type == CHIP_IRIS7) {
 		iris_pmu_power_set(MIPI2_PWR, 0, 1);
@@ -2354,9 +2464,9 @@ static ssize_t _iris_lp_write(uint32_t val)
 	} else if (val == 12) {
 		iris_pmu_mipi2_set(false, false);
 	} else if (val == 13) {
-		iris_pmu_bsram_set(true, false);
+		iris_pmu_bsram_set(true, false, IRIS_BSRAM_DEBUG);
 	} else if (val == 14) {
-		iris_pmu_bsram_set(false, false);
+		iris_pmu_bsram_set(false, false, IRIS_BSRAM_DEBUG);
 	} else if (val == 15) {
 		iris_pmu_frc_set(true, false);
 	} else if (val == 16) {
@@ -2802,6 +2912,7 @@ static ssize_t vc_enable_store(struct kobject *obj, struct kobj_attribute *attr,
 
 	return count;
 }
+
 static ssize_t abyp_show(struct kobject *obj, struct kobj_attribute *attr, char *buf)
 {
 	return _iris_abyp_sysfs_read(buf, SZ_32);

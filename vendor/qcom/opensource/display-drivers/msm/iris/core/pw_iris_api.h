@@ -52,6 +52,7 @@ void iris_fpga_adjust_read_buf(u32 repeated_bytes,
 							   u32 read_cnt,
 							   u8 *rd_buf);
 void iris_update_panel_ap_te(void *handle, u32 new_te);
+void iris_exit_abyp_update_panel_ap_te(void *handle, u32 new_te);
 int iris_EDR_backlight_ctrl(u32 hdr_nit, u32 ratio_panel);
 int iris_need_update_pps_one_time(void);
 enum iris_chip_type iris_get_chip_type(void);

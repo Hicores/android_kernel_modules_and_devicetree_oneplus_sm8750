@@ -34,6 +34,8 @@
 #define MICRO_5V 			5000
 #define DELAY_TIME			100
 #define MAX_PD_INPUT_CURRENT		2000
+#define VBUS_5V			5000
+#define VBUS_9V			9000
 
 enum dr {
 	DR_IDLE,
@@ -159,7 +161,7 @@ static void tcpc_set_current_max(struct pd_manager_chip *chip, int max)
 	if (!icl_votable)
 		chg_err("WIRED_ICL votable not found\n");
 	else
-		icl_tmp_ma = get_client_vote(icl_votable, MAX_VOTER);
+		icl_tmp_ma = get_client_vote_locked(icl_votable, MAX_VOTER);
 
 	if (chip->current_max_ma == max && icl_tmp_ma <= max && icl_tmp_ma > 0) {
 		chg_info("current_max_ma = %d\n", icl_tmp_ma);
@@ -1264,6 +1266,16 @@ static int oplus_pdc_setup(struct pd_manager_chip *chip, int *vbus_mv, int *ibus
 	int ibus_ma_t = 0;
 	struct tcpc_device *tcpc = chip->tcpc;
 
+	if (*vbus_mv == VBUS_5V)
+		ret = tcpm_set_pd_charging_policy(tcpc, DPM_CHARGING_POLICY_VSAFE5V, NULL);
+	else
+		ret = tcpm_set_pd_charging_policy(tcpc, DPM_CHARGING_POLICY_MAX_POWER_LVIC, NULL);
+
+	if (ret != TCPM_SUCCESS) {
+		chg_err("tcpm_set_apdo_charging_policy fail\n");
+		return -EINVAL;
+	}
+
 	ret = tcpm_dpm_pd_request(tcpc, *vbus_mv, *ibus_ma, NULL);
 	if (ret != TCPM_SUCCESS) {
 		chg_err("tcpm_dpm_pd_request fail, rc=%d\n", ret);
@@ -1330,18 +1342,19 @@ static int oplus_pdo_select(struct pd_manager_chip *chip, int vbus_mv, int ibus_
 					ibus = pd_cap.ma[i];
 					if (ibus > ibus_ma)
 						ibus = ibus_ma;
-					break;
+					goto out;
 				}
 				chg_info("%d mv:[%d,%d] type:%d %d\n", i,
 					 pd_cap.min_mv[i], pd_cap.max_mv[i],
 					 pd_cap.ma[i], pd_cap.type[i]);
 			}
+			return -EINVAL;
 		}
 	} else {
 		vbus = 5000;
 		ibus = 2000;
 	}
-
+out:
 	return oplus_pdc_setup(chip, &vbus, &ibus);
 }
 
@@ -1447,10 +1460,6 @@ static int pd_manager_set_pd_config(struct oplus_chg_ic_dev *ic_dev, u32 pdo)
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
 
 	pd_manager_suspend_charger(true);
-	rc = tcpm_set_pd_charging_policy(chip->tcpc, DPM_CHARGING_POLICY_MAX_POWER_LVIC, NULL);
-	if (rc != TCPM_SUCCESS)
-		chg_err("tcpm_set_pd_charging_policy fail\n");
-
 	switch (PD_SRC_PDO_TYPE(pdo)) {
 	case PD_SRC_PDO_TYPE_FIXED:
 		vol_mv = PD_SRC_PDO_FIXED_VOLTAGE(pdo) * 50;
@@ -1730,14 +1739,7 @@ static int oplus_chg_set_fixed_pd_config(struct oplus_chg_ic_dev *ic_dev, int vo
 	if (curr_ma >= MAX_PD_INPUT_CURRENT)
 		curr_ma = MAX_PD_INPUT_CURRENT;
 	pd_manager_suspend_charger(true);
-	rc = tcpm_set_pd_charging_policy(chip->tcpc, DPM_CHARGING_POLICY_MAX_POWER_LVIC, NULL);
-	if (rc != TCPM_SUCCESS)
-		chg_err("tcpm_set_pd_charging_policy fail\n");
-
-	rc = tcpm_dpm_pd_request(chip->tcpc, vol_mv, curr_ma, NULL);
-	if (rc != TCPM_SUCCESS)
-		chg_err("tcpm_dpm_pd_request fail\n");
-
+	oplus_pdc_setup(chip, &vol_mv, &curr_ma);
 	msleep(DELAY_TIME);
 	pd_manager_suspend_charger(false);
 	return rc;

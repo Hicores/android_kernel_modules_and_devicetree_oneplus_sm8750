@@ -2,7 +2,7 @@
 /*
  * Copyright (C) 2022-2023 Oplus. All rights reserved.
  */
-#define pr_fmt(fmt) "[sc6607]:%s: " fmt, __func__
+#define pr_fmt(fmt) "[sc6607]:[%s][%d]: " fmt, __func__, __LINE__
 
 #include <linux/gpio.h>
 #include <linux/i2c.h>
@@ -970,7 +970,7 @@ static int sc6607_voocphy_svooc_hw_setting(struct oplus_voocphy_manager *voocphy
 	ret = sc6607_field_write(chip, F_IBUS_OCP, reg_data); /*IBUS_OCP_UCP:4.25A*/
 	ret = sc6607_set_charge_watchdog_timer(chip, 1000);
 	ret = sc6607_field_write(chip, F_MODE, 0x0);
-	ret = sc6607_field_write(chip, F_PMID2OUT_OVP, 0x05);
+	ret = sc6607_field_write(chip, F_PMID2OUT_OVP, 0x07);
 	ret = sc6607_field_write(chip, F_CHG_EN, true);
 	ret = sc6607_field_write(chip, F_PERFORMANCE_EN, true);
 	sc6607_voocphy_read_byte(voocphy->client, SC6607_REG_CP_CTRL, &data);

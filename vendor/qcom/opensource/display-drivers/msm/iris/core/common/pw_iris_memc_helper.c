@@ -165,6 +165,7 @@ static struct iris_memc_dsc_info iris_dsc_info[DSC_PPS_SET_CNT];
 static struct iris_memc_dsc_info iris_dsc_last_info[DSC_PPS_SET_CNT];
 static uint32_t iris_dsc_active_path = DSC_PPS_SET_CNT;
 
+static bool _iris_memc_mode(void);
 
 static void _iris_dsc_parse_payload(uint32_t *payload, uint32_t pps_sel)
 {
@@ -1766,6 +1767,52 @@ static uint32_t _iris_sr_change_type(bool enable, int32_t in_h, int32_t in_v,
 	return SCL_FULL_CHANGE;
 }
 
+static void _iris_ptsr_switch_efifo(bool enable)
+{
+	struct iris_cfg *pcfg = iris_get_cfg();
+	uint32_t *payload = NULL;
+	uint8_t pwil_efifo = 0;
+	u32 reg_val;
+	bool allow2off = true;
+
+	if (pcfg->rx_mode != IRIS_VIDEO_MODE || pcfg->tx_mode != IRIS_VIDEO_MODE)
+		return;
+
+	IRIS_LOGI("%s(), enable = %d.", __func__, enable);
+
+	payload = iris_get_ipopt_payload_data(IRIS_IP_PWIL, 0x01, 4);
+	reg_val = payload[0];
+	if (payload == NULL) {
+		IRIS_LOGE("%s(), failed to find pwil control.", __func__);
+		return;
+	}
+
+	if (enable) {
+		iris_pmu_bsram_set(true, false, IRIS_BSRAM_PTSR);
+		pwil_efifo = 0x3;
+
+		payload[0] = BITS_SET(reg_val, 2, 1, pwil_efifo);
+		iris_init_update_ipopt_t(IRIS_IP_PWIL, 0x01, 0x01, 1);
+		/* update */
+		iris_init_update_ipopt_t(IRIS_IP_PWIL, 0x80, 0x80, 1);
+	} else {
+		if (!enable && _iris_memc_mode() && (pcfg->memc_info.panel_fps == IRIS_FPS_144)) {
+			pwil_efifo = 0x3;
+			allow2off = false;
+			IRIS_LOGI("%s(), try to disable but MEMC_enable, return.", __func__);
+		}
+
+		if (allow2off) {
+			payload[0] = BITS_SET(reg_val, 2, 1, pwil_efifo);
+			iris_init_update_ipopt_t(IRIS_IP_PWIL, 0x01, 0x01, 1);
+			/* update */
+			iris_init_update_ipopt_t(IRIS_IP_PWIL, 0x80, 0x80, 1);
+		}
+
+		iris_pmu_bsram_set(false, false, IRIS_BSRAM_PTSR);
+	}
+}
+
 static void _iris_ioinc_config_pwil(bool enable, int32_t proc_h, int32_t proc_v,
 		uint32_t path_sel)
 {
@@ -1789,6 +1836,8 @@ static void _iris_ioinc_config_pwil(bool enable, int32_t proc_h, int32_t proc_v,
 		break;
 
 	case SCL_DATA_PATH1: /* path1 */
+		_iris_ptsr_switch_efifo(enable);
+
 		payload = iris_get_ipopt_payload_data(IRIS_IP_PWIL, 0x02, 2);
 		if (payload == NULL) {
 			IRIS_LOGE("%s(), failed to find pwil graphic control.", __func__);
@@ -4129,6 +4178,33 @@ void iris_memc_helper_post(void)
 	IRIS_ATRACE_END(__func__);
 }
 
+bool iris_is_ptsr_enable(void)
+{
+	bool ret = false;
+	uint32_t *payload = NULL;
+	struct iris_cfg *pcfg = iris_get_cfg();
+
+	if (pcfg->rx_mode != IRIS_VIDEO_MODE || pcfg->tx_mode != IRIS_VIDEO_MODE)
+		return ret;
+
+	if (pcfg->abyp_ctrl.abypass_mode != PASS_THROUGH_MODE)
+		return ret;
+
+	/* PTSR is enabled */
+	payload = iris_get_ipopt_payload_data(IRIS_IP_PWIL, 0x02, 2);
+	if (payload != NULL) {
+		uint32_t proc_h = BITS_GET(payload[5], 16, 0);
+		uint32_t proc_v = BITS_GET(payload[5], 16, 16);
+
+		if (proc_h != pcfg->frc_setting.disp_hres ||
+			proc_v != pcfg->frc_setting.disp_vres ||
+			iris_ptsr_1to1)
+			ret = true;
+	}
+
+	IRIS_LOGD("%s(), enable: %d", __func__, ret);
+	return ret;
+}
 
 const char *iris_ptsr_status(void)
 {
@@ -4261,26 +4337,37 @@ static int _iris_get_sr_info(char *kbuf, int size, bool hide_mode)
 {
 	struct iris_cfg *pcfg = iris_get_cfg();
 	uint32_t path_sel = SCL_DATA_PATH1;
+	uint32_t sr_mode = SCL_2D_ONLY;
 	const char *status = _iris_sr_status();
 	int len = 0;
 
 	if (pcfg->pwil_mode == FRC_MODE)
 		path_sel = SCL_DATA_PATH0;
+	sr_mode = _iris_scl_conf[path_sel].sr_strategy;
 
 	if (!hide_mode)
 		len += snprintf(kbuf, size,
-				"%-20s:\t%s\n", "SR mode", status == NULL ? "Not set" : status);
+			"%-20s:\t%s\n", "SR mode", status == NULL ? "Not set" : status);
 	len += snprintf(kbuf + len, size - len,
-			"%-20s:\t%u x %u\n", "proc size",
-			_iris_scl_conf[path_sel].sr_in_h, _iris_scl_conf[path_sel].sr_in_v);
-	len += snprintf(kbuf + len, size - len,
+		"%-20s:\t%u x %u\n", "proc size",
+		_iris_scl_conf[path_sel].sr_in_h, _iris_scl_conf[path_sel].sr_in_v);
+	if (sr_mode == SCL_2D_ONLY || sr_mode == SCL_CNN_2D)
+		len += snprintf(kbuf + len, size - len,
 			"%-20s:\t%u %u %u %u\n", "2D parameter",
 			iris_sr2d_using_level[SCL_2D_GF],
 			iris_sr2d_using_level[SCL_2D_DETECT],
 			iris_sr2d_using_level[SCL_2D_PEAKING],
 			iris_sr2d_using_level[SCL_2D_DTI]);
-	len += snprintf(kbuf + len, size - len,
+	else
+		len += snprintf(kbuf + len, size - len,
+			"%-20s:\t/ / / /\n", "2D parameter");
+
+	if (sr_mode == SCL_CNN_ONLY || sr_mode == SCL_CNN_1D || sr_mode == SCL_CNN_2D)
+		len += snprintf(kbuf + len, size - len,
 			"%-20s:\t%u\n", "CNN model", iris_cnn_using_model);
+	else
+		len += snprintf(kbuf + len, size - len,
+			"%-20s:\t/\n", "CNN model");
 
 	return len;
 }

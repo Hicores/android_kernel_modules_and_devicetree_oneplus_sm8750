@@ -61,11 +61,11 @@ void iris_scl_ptsr_get(uint32_t count, uint32_t *values);
 int iris_get_sr_info(char *kbuf, int size, bool hide_mode);
 void iris_set_pp_scl_aux(void);
 void iris_scl_update_model(uint32_t count, uint32_t *values);
+bool iris_is_ptsr_enable(void);
 const char *iris_ptsr_status(void);
 int iris_dbgfs_scl_init(void);
 int iris_get_sr_info(char *kbuf, int size, bool hide_mode);
 void iris_memc_helper_setup(void);
-void iris_memc_helper_setup_i8(struct iris_memc_helper_ops *memc_helper_ops);
 int32_t iris_calc_inc(int32_t in_hv, int32_t prec, int32_t out_hv);
 int32_t iris_calc_init_phase(int32_t hv_inc, int32_t frac, int32_t prec,
 	uint32_t tap_num);

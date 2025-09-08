@@ -768,6 +768,13 @@
                     "str": "batt_sub_btb"
                 },
                 {
+                    "lable": "TRACK_GAGUE_QCOM_CALI_INFO",
+                    "desc": {
+                        "zh": "QCOM平台电量计异常校准信息"
+                    },
+                    "str": "qcom_cali_info"
+                },
+                {
                     "lable": "TRACK_GAGUE_ERR_MAX",
                     "desc": {
                         "zh": "异常上限"

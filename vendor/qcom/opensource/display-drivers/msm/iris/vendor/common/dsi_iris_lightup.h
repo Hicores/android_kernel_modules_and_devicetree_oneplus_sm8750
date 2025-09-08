@@ -46,6 +46,9 @@ int32_t iris_parse_optional_seq(struct device_node *np, const uint8_t *key,
 
 //int iris_display_cmd_engine_enable(struct dsi_display *display);
 //int iris_display_cmd_engine_disable(struct dsi_display *display);
+int iris_display_engine_enable(struct dsi_display *display);
+int iris_display_engine_disable(struct dsi_display *display);
+
 void iris_insert_delay_us(uint32_t payload_size, uint32_t cmd_num);
 int iris_get_vreg(void);
 int iris_dbgfs_cont_splash_init(void *display);

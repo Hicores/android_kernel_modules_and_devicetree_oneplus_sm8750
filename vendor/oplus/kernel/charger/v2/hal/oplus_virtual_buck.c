@@ -2209,6 +2209,7 @@ static int oplus_chg_vb_set_pd_config(struct oplus_chg_ic_dev *ic_dev, u32 pdo)
 	struct oplus_virtual_buck_ic *vb;
 	int i;
 	int rc = 0;
+	int status = -ENOTSUPP;
 
 	if (ic_dev == NULL) {
 		chg_err("oplus_chg_ic_dev is NULL");
@@ -2225,13 +2226,17 @@ static int oplus_chg_vb_set_pd_config(struct oplus_chg_ic_dev *ic_dev, u32 pdo)
 			vb->child_list[i].ic_dev,
 			OPLUS_IC_FUNC_BUCK_SET_PD_CONFIG,
 			pdo);
-		if (rc < 0)
+		if (rc < 0) {
 			chg_err("child ic[%d] set pdo(=0x%08x) error, rc=%d\n", i, pdo, rc);
-		else
-			return 0;
+			return rc;
+		} else {
+			status = 0;
+		}
 	}
-
-	return rc;
+	if (status == -ENOTSUPP && rc == -ENOTSUPP)
+		return rc;
+	else
+		return 0;
 }
 
 static int oplus_chg_vb_wls_boost_enable(struct oplus_chg_ic_dev *ic_dev, bool en)

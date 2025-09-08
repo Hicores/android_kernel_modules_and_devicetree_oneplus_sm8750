@@ -98,6 +98,7 @@ static int iris_catalog_init_i7p(void)
 	pcfg->pw_chip_func_ops.iris_send_meta_ = NULL;
 	pcfg->pw_chip_func_ops.iris_send_win_corner_ = NULL;
 	pcfg->pw_chip_func_ops.iris_delay_win_corner_ = NULL;
+	pcfg->pw_chip_func_ops.iris_convert_dsi_to_i2c = iris_convert_dsi_to_i2c_i7p;
 
 	iris_memc_func_init();
 	iris_memc_helper_setup();
@@ -144,6 +145,7 @@ static const struct iris_ver_spec_info iris7p = {
 static const struct of_device_id iris_dt_of_match[] = {
 	{ .compatible = "pxlw,iris7p",
 	  .data = &iris7p,},
+	{}
 };
 
 static int _iris_pdev_probe(struct platform_device *pdev)

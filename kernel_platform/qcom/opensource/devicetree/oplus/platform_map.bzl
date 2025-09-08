@@ -25,17 +25,6 @@ _platform_map = {
         ],
         "dtbo_list": [
             # keep sorted
-            {"name": "dodge-23821-sun-overlay.dtbo"},
-            {"name": "dodge-23821-sun-overlay-T0.dtbo"},
-            {"name": "dodge-23893-sun-overlay.dtbo"},
-            {"name": "dodge-23893-sun-overlay-T0.dtbo"},
-            {"name": "erhai-24926-sun-overlay.dtbo"},
-            {"name": "erhai-24926-sun-overlay-DVT.dtbo"},
-            {"name": "erhai-24976-sun-overlay.dtbo"},
-            {"name": "erhai-24976-sun-overlay-DVT.dtbo"},
-            {"name": "erhai-24976-eu-sun-overlay.dtbo"},
-            {"name": "erhai-24976-eu-sun-overlay-DVT.dtbo"},
-            {"name": "hummer-24811-sun-overlay.dtbo"},
             {"name": "pagani-24821-sun-overlay.dtbo"},
             {"name": "pagani-24875-sun-overlay.dtbo"},
         ],

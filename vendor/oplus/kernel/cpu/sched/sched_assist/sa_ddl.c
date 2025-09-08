@@ -9,7 +9,6 @@
 #if IS_ENABLED(CONFIG_OPLUS_SCHED_GROUP_OPT)
 #include "sa_group.h"
 #endif
-
 pid_t ddl_pid_rd = -1;
 
 #define MSEC_TO_NSEC(val) (val * NSEC_PER_MSEC)
@@ -303,7 +302,6 @@ void oplus_replace_next_task_ddl(struct rq *rq, struct task_struct **p,
 	bool active_preempted = false;
 	u64 now = rq_clock(rq), runnable_time;
 	struct oplus_task_struct *ots;
-
 	ots = pick_ddl_task(rq, &active_preempted);
 	if (IS_ERR_OR_NULL(ots))
 		return;

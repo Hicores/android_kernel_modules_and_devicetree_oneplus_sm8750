@@ -180,6 +180,11 @@ void iris_set_panel_timing(uint32_t index,
 	//if (!iris_is_chip_supported())
 	//	return;
 
+	IRIS_LOGI("%s(), timing@%u: %ux%u@%uHz, clk: %llu Hz, mdp transfer time: %u us",
+		__func__, index,
+		timing->h_active, timing->v_active, timing->refresh_rate,
+		timing->clk_rate_hz, timing->mdp_transfer_time_us);
+
 	if (index >= pcfg_ts->panel_tm_num)
 		return;
 
@@ -190,10 +195,6 @@ void iris_set_panel_timing(uint32_t index,
 	if (!_iris_support_timing_switch())
 		return;
 
-	IRIS_LOGI("%s(), timing@%u: %ux%u@%uHz, clk: %llu Hz, mdp transfer time: %u us",
-		__func__, index,
-		timing->h_active, timing->v_active, timing->refresh_rate,
-		timing->clk_rate_hz, timing->mdp_transfer_time_us);
 	memcpy(&pcfg_ts->panel_tm_arry[index], timing,
 			sizeof(struct iris_mode_info));
 }
@@ -691,14 +692,18 @@ static uint32_t _iris_generate_switch_case(const struct iris_mode_info *new_timi
 	bool cur_pt_mode = false;
 	u32 new_cmd_list_idx = 0;
 	struct iris_cfg_ts *pcfg_ts = _iris_get_ts_cfg();
-	struct iris_mode_info *last_pt_timing = &pcfg_ts->panel_tm_arry[pcfg_ts->last_pt_tm_index];
+	struct iris_mode_info *last_pt_timing = NULL;
 
 	if (!_iris_support_timing_switch())
 		return SWITCH_ABYP_TO_ABYP;
 
+	last_pt_timing = &pcfg_ts->panel_tm_arry[pcfg_ts->last_pt_tm_index];
+
 	if (iris_get_abyp_mode() == PASS_THROUGH_MODE)
 		cur_pt_mode = true;
+
 	pcfg_ts->new_tm_index = _iris_get_timing_index(new_timing);
+	IRIS_LOGI("%s get tm idx:%d", __func__, pcfg_ts->new_tm_index);
 	new_cmd_list_idx = pcfg_ts->tm_cmd_map_arry[pcfg_ts->new_tm_index];
 
 	if (new_cmd_list_idx != IRIS_DTSI_NONE)
@@ -779,9 +784,9 @@ bool iris_is_abyp_timing(const struct iris_mode_info *new_timing)
 
 static void _iris_pre_fps_switch(void)
 {
-	struct iris_cfg *pcfg = iris_get_cfg();
 	uint32_t *payload = NULL;
 	uint8_t val = 0;
+	struct iris_cfg *pcfg = iris_get_cfg();
 
 	/* Follow _iris_abyp_ctrl_init() */
 	payload = iris_get_ipopt_payload_data(IRIS_IP_SYS,
@@ -1150,6 +1155,8 @@ void iris_pre_switch(struct iris_mode_info *new_timing)
 		pcfg_ts->clock_changed = _iris_need_fps_clk_seq();
 		if (timing_switch_ops.iris_pre_switch)
 			timing_switch_ops.iris_pre_switch(new_timing->refresh_rate, pcfg_ts->clock_changed);
+	} else {
+		iris_update_panel_ap_te(NULL, new_timing->refresh_rate);
 	}
 
 	IRIS_LOGI("%s(), timing@%u, %ux%u@%uHz, cmd list: %u, case: %s",

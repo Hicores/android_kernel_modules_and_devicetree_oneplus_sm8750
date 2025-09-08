@@ -31,13 +31,16 @@
 
 
 #define FTS_REG_SMOOTH_LEVEL                    0x85
-#define FTS_REG_GAME_MODE_EN                    0xC3
+#define FTS_REG_GAME_MODE_EN                    0x86
 #define FTS_REG_REPORT_RATE                     0x88/*0x12:180hz, 0x0C:120hz*/
+#define FTS_REG_HIGH_FRAME_TIME                 0x8A
 #define FTS_REG_CHARGER_MODE_EN                 0x8B
 #define FTS_REG_EDGE_LIMIT                      0x8C
 #define FTS_REG_STABLE_DISTANCE_AFTER_N         0xB9
 #define FTS_REG_STABLE_DISTANCE                 0xBA
 #define FTS_REG_HEADSET_MODE_EN                 0xC4
+#define FTS_REG_DIAPHRAGM_TOUCH_MODE_EN         0xC5
+#define FTS_REG_PALM_TO_SLEEP_STATUS            0x9B
 #define FTS_REG_FOD_EN                          0xCF
 #define FTS_REG_FOD_INFO                        0xE1
 #define FTS_REG_FOD_INFO_LEN                    9
@@ -68,12 +71,20 @@
 
 #define FTS_MAX_POINTS_SUPPORT                  10
 #define FTS_MAX_ID                              0x0A
-#define FTS_POINTS_ONE                          21  /*2 + 6*3 + 1*/
-#define FTS_POINTS_TWO                          41  /*8*10 - 1*/
+#define FTS_POINTS_ONE                          15  /*2 + 6*3 + 1*/
+#define FTS_POINTS_TWO                          47  /*8*10 - 1*/
 #define FTS_MAX_POINTS_LENGTH          ((FTS_POINTS_ONE) + (FTS_POINTS_TWO))
 #define FTS_REG_POINTS                          0x01
 #define FTS_REG_POINTS_N                        (FTS_POINTS_ONE + 1)
 #define FTS_REG_POINTS_LB                       0x3E
+#define FTS_REG_GRIP                            0x3F
+
+#define FTS_GRIP_ONE                            8   /* The first two grip_info: 4*2 */
+#define FTS_GRIP_TWO                            32  /* The last eight grip_info: 4*8 */
+#define FTS_GRIP_LENGTH                ((FTS_GRIP_ONE) + (FTS_GRIP_TWO))
+#define FTS_REG_GRIP_N                          0x47
+
+#define FTS_MAX_POINTS_GRIP_LENGTH          ((FTS_MAX_POINTS_LENGTH) + (FTS_GRIP_LENGTH))
 
 #define FTS_MAX_TOUCH_BUF                       4096
 
@@ -154,6 +165,23 @@
 
 #define MAX_PACKET_SIZE                         128
 
+#define FTS_WRITE_RATE_120                      120
+#define FTS_WRITE_RATE_180                      180
+#define FTS_WRITE_RATE_240                      240
+#define FTS_WRITE_RATE_360                      360
+#define FTS_WRITE_RATE_720                      720
+
+#define FTS_120HZ_REPORT_RATE                   0x0C
+#define FTS_180HZ_REPORT_RATE                   0x12
+#define FTS_240HZ_REPORT_RATE                   0x18
+#define FTS_360HZ_REPORT_RATE                   0x24
+#define FTS_720HZ_REPORT_RATE                   0x24
+
+#define FTS_DIAPHRAGM_MODE_0                    0
+#define FTS_DIAPHRAGM_MODE_1                    1
+#define FTS_DIAPHRAGM_MODE_2                    2
+#define FTS_DIAPHRAGM_MODE_3                    3
+
 struct fts_autotest_offset {
 	int32_t *fts_raw_data_P;
 	int32_t *fts_raw_data_N;
@@ -181,6 +209,13 @@ enum FW_STATUS {
 	FTS_RUN_IN_BOOTLOADER,
 };
 
+enum DIAPHRAGM_MODE{
+	DIAPHRAGM_DEFAULT_MODE = 0,
+	DIAPHRAGM_FILM_MODE = 1,
+	DIAPHRAGM_WATERPROOF_MODE = 2,
+	DIAPHRAGM_FILM_WATERPROOF_MODE = 3,
+};
+
 struct fts_fod_info {
 	u8 fp_id;
 	u8 event_type;
@@ -204,7 +239,7 @@ struct chip_data_ft3419u {
 	bool esd_check_enabled;
 	bool use_panelfactory_limit;
 	bool prc_mode;
-	u8 rbuf[FTS_MAX_POINTS_LENGTH];
+	u8 rbuf[FTS_MAX_POINTS_GRIP_LENGTH];
 	u8 irq_type;
 	u8 fwver;
 	u8 touch_direction;
@@ -226,6 +261,7 @@ struct chip_data_ft3419u {
 	int tp_index;
 	int *node_valid;
 	int *node_valid_sc;
+	int *noise_rawdata;
 	u8 fre_num;
 
 	char *test_limit_name;
@@ -240,12 +276,15 @@ struct chip_data_ft3419u {
 	struct seq_file *s;
 	struct fts_autotest_offset *fts_autotest_offset;
 	struct touchpanel_data *ts;
+	struct monitor_data *monitor_data;
 	struct delayed_work prc_work;
 	struct workqueue_struct *ts_workqueue;
 	unsigned long intr_jiffies;
 	bool high_resolution_support;
 	bool high_resolution_support_x8;
+	bool ft3419u_grip_v2_support;
 	int gesture_state;
+	bool water_mode;
 };
 
 
@@ -255,6 +294,8 @@ int fts_test_entry(struct chip_data_ft3419u *ts_data,
                    struct auto_testdata *focal_testdata);
 int ft3419u_auto_preoperation(struct seq_file *s, void *chip_data,
                              struct auto_testdata *focal_testdata, struct test_item_info *p_test_item_info);
+int ft3419u_noise_autotest(struct seq_file *s, void *chip_data,
+                         struct auto_testdata *focal_testdata, struct test_item_info *p_test_item_info);
 int ft3419u_rawdata_autotest(struct seq_file *s, void *chip_data,
                             struct auto_testdata *focal_testdata, struct test_item_info *p_test_item_info);
 int ft3419u_uniformity_autotest(struct seq_file *s, void *chip_data,

@@ -75,10 +75,14 @@
 #define SUSPEND_IBUS_MA				100
 #define DEFAULT_IBUS_MA				500
 
+#define I2C_RETRY_DELAY_US			5000
+#define I2C_RETRY_WRITE_MAX_COUNT		3
+#define I2C_RETRY_READ_MAX_COUNT		20
 #define OPLUS_BC12_RETRY_CNT 			1
 #define OPLUS_BC12_DELAY_CNT 			18
 #define INIT_WORK_NORMAL_DELAY 			1500
 #define INIT_WORK_OTHER_DELAY 			1000
+#define PRE_EVENT_WORK_DELAY_MS			2000
 #define PORT_PD_WITH_USB 			2
 
 #ifdef CONFIG_OPLUS_CHARGER_MTK
@@ -151,6 +155,7 @@ struct sy6974b_chip {
 	bool dpdm_enabled;
 	bool power_good;
 	struct delayed_work	bc12_retry_work;
+	struct delayed_work	pre_event_work;
 	bool bc12_done;
 	char bc12_delay_cnt;
 	char bc12_retried;
@@ -216,177 +221,72 @@ static void sy6974b_enable_irq(struct sy6974b_chip *chip, bool en)
 	}
 }
 
-static int sy6974b_read_byte(struct sy6974b_chip *chip, u8 addr, u8 *data)
+static int _sy6974b_read_byte(struct sy6974b_chip *chip, int reg, int *data)
 {
-	int rc;
-	bool is_err = false;
-	int retry = 3;
+	s32 ret = 0;
+	int retry = I2C_RETRY_READ_MAX_COUNT;
 
-	mutex_lock(&chip->i2c_lock);
-	do {
-		if (is_err)
-			usleep_range(5000, 5000);
+	ret = i2c_smbus_read_byte_data(chip->client, reg);
 
-		rc = i2c_master_send(chip->client, &addr, 1);
-		if (rc < 1) {
-			chg_err("read 0x%02x error, rc=%d\n", addr, rc);
-			rc = rc < 0 ? rc : -EIO;
-			is_err = true;
-			continue;
+	if (ret < 0) {
+		while(retry > 0 && atomic_read(&chip->driver_suspended) == 0) {
+			usleep_range(I2C_RETRY_DELAY_US, I2C_RETRY_DELAY_US);
+			ret = i2c_smbus_read_byte_data(chip->client, reg);
+			if (ret < 0)
+				retry--;
+			else
+				break;
 		}
-
-		rc = i2c_master_recv(chip->client, data, 1);
-		if (rc < 1) {
-			chg_err("read 0x%02x error, rc=%d\n", addr, rc);
-			rc = rc < 0 ? rc : -EIO;
-			is_err = true;
-			continue;
-		}
-		is_err = false;
-	} while (is_err && retry--);
-
-	if (is_err)
-		goto error;
-
-	mutex_unlock(&chip->i2c_lock);
-	sy6974b_i2c_err_clr();
-	return 0;
-
-error:
-	mutex_unlock(&chip->i2c_lock);
-	sy6974b_i2c_err_inc(chip);
-	return rc;
-}
-
-__maybe_unused static int sy6974b_read_data(struct sy6974b_chip *chip, u8 addr, u8 *buf, int len)
-{
-	int rc;
-	bool is_err = false;
-	int retry = 3;
-
-	mutex_lock(&chip->i2c_lock);
-	do {
-		if (is_err)
-			usleep_range(5000, 5000);
-
-		rc = i2c_master_send(chip->client, &addr, 1);
-		if (rc < 1) {
-			chg_err("read 0x%02x error, rc=%d\n", addr, rc);
-			rc = rc < 0 ? rc : -EIO;
-			is_err = true;
-			continue;
-		}
-
-		rc = i2c_master_recv(chip->client, buf, len);
-		if (rc < len) {
-			chg_err("read 0x%02x error, rc=%d\n", addr, rc);
-			rc = rc < 0 ? rc : -EIO;
-			is_err = true;
-			continue;
-		}
-		is_err = false;
-	} while (is_err && retry--);
-
-	if (is_err)
-		goto error;
-
-	mutex_unlock(&chip->i2c_lock);
-	sy6974b_i2c_err_clr();
-	return 0;
-
-error:
-	mutex_unlock(&chip->i2c_lock);
-	sy6974b_i2c_err_inc(chip);
-	return rc;
-}
-
-static int sy6974b_write_byte(struct sy6974b_chip *chip, u8 addr, u8 data)
-{
-	u8 buf_temp[2] = { addr, data };
-	int rc;
-	bool is_err = false;
-	int retry = 3;
-
-	mutex_lock(&chip->i2c_lock);
-	do {
-		if (is_err)
-			usleep_range(5000, 5000);
-
-		rc = i2c_master_send(chip->client, buf_temp, 2);
-		if (rc < 2) {
-			chg_err("write 0x%02x error, rc=%d\n", addr, rc);
-			rc = rc < 0 ? rc : -EIO;
-			is_err = true;
-			continue;
-		}
-		is_err = false;
-	} while (is_err && retry--);
-
-	if (is_err)
-		goto error;
-
-	mutex_unlock(&chip->i2c_lock);
-	sy6974b_i2c_err_clr();
-	return 0;
-
-error:
-	mutex_unlock(&chip->i2c_lock);
-	sy6974b_i2c_err_inc(chip);
-	return rc;
-}
-
-__maybe_unused static int sy6974b_write_data(struct sy6974b_chip *chip, u8 addr, u8 *buf, int len)
-{
-	u8 *buf_temp;
-	int i;
-	int rc;
-	bool is_err = false;
-	int retry = 3;
-
-	buf_temp = kzalloc(len + 1, GFP_KERNEL);
-	if (!buf_temp) {
-		chg_err("alloc memary error\n");
-		return -ENOMEM;
 	}
 
-	buf_temp[0] = addr;
-	for (i = 0; i < len; i++)
-		buf_temp[i + 1] = buf[i];
+	if (ret < 0) {
+		chg_err("i2c read fail: can't read from %02x: %d\n", reg, ret);
+		return ret;
+	} else
+		*data = ret;
 
-	mutex_lock(&chip->i2c_lock);
-	do {
-		if (is_err)
-			usleep_range(5000, 5000);
-
-		rc = i2c_master_send(chip->client, buf_temp, len + 1);
-		if (rc < (len + 1)) {
-			chg_err("write 0x%02x error, rc=%d\n", addr, rc);
-			rc = rc < 0 ? rc : -EIO;
-			is_err = true;
-			continue;
-		}
-		is_err = false;
-	} while (is_err && retry--);
-
-	if (is_err)
-		goto error;
-
-	mutex_unlock(&chip->i2c_lock);
-	kfree(buf_temp);
-	sy6974b_i2c_err_clr();
 	return 0;
+}
 
-error:
+static int sy6974b_read_byte(struct sy6974b_chip *chip, int addr, int *data)
+{
+	int rc = 0;
+	mutex_lock(&chip->i2c_lock);
+	rc = _sy6974b_read_byte(chip, addr, data);
 	mutex_unlock(&chip->i2c_lock);
-	kfree(buf_temp);
-	sy6974b_i2c_err_inc(chip);
 	return rc;
 }
 
-__maybe_unused static int sy6974b_read_byte_mask(struct sy6974b_chip *chip,
-		u8 addr, u8 mask, u8 *data)
+static int sy6974b_write_byte(struct sy6974b_chip *chip, int reg, int val)
 {
-	u8 temp;
+	s32 ret = 0;
+	int retry = I2C_RETRY_WRITE_MAX_COUNT;
+
+	ret = i2c_smbus_write_byte_data(chip->client, reg, val);
+
+	if (ret < 0) {
+		while(retry > 0) {
+			usleep_range(I2C_RETRY_DELAY_US, I2C_RETRY_DELAY_US);
+			ret = i2c_smbus_write_byte_data(chip->client, reg, val);
+			if (ret < 0)
+				retry--;
+			else
+				break;
+		}
+	}
+
+	if (ret < 0) {
+		chg_err("i2c write fail: can't write %02x to %02x: %d\n", val, reg, ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int sy6974b_read_byte_mask(struct sy6974b_chip *chip,
+		int addr, int mask, int *data)
+{
+	int temp = 0;
 	int rc;
 
 	rc = sy6974b_read_byte(chip, addr, &temp);
@@ -398,20 +298,20 @@ __maybe_unused static int sy6974b_read_byte_mask(struct sy6974b_chip *chip,
 	return 0;
 }
 
-__maybe_unused static int sy6974b_write_byte_mask(struct sy6974b_chip *chip,
-		u8 addr, u8 mask, u8 data)
+static int sy6974b_write_byte_mask(struct sy6974b_chip *chip,
+		int addr, int mask, int data)
 {
-	u8 temp;
+	int temp = 0;
 	int rc;
-
-	rc = sy6974b_read_byte(chip, addr, &temp);
+	mutex_lock(&chip->i2c_lock);
+	rc = _sy6974b_read_byte(chip, addr, &temp);
 	if (rc < 0)
-		return rc;
+		goto ERR;
+
 	temp = (data & mask) | (temp & (~mask));
 	rc = sy6974b_write_byte(chip, addr, temp);
-	if (rc < 0)
-		return rc;
-
+ERR:
+	mutex_unlock(&chip->i2c_lock);
 	return 0;
 }
 
@@ -451,27 +351,10 @@ static int sy6974b_request_dpdm(struct sy6974b_chip *chip, bool enable)
 	return rc;
 }
 
-static int sy6974b_enable_hiz_mode(struct sy6974b_chip *chip, bool en)
-{
-	int rc;
-
-	rc = sy6974b_write_byte_mask(chip, HIZ_MODE_REG, HIZ_MODE_BIT, en ? HIZ_MODE_BIT : 0x00);
-	if (rc < 0) {
-		chg_err("can't %s hiz mode, rc=%d\n", en ? "enable" : "disable", rc);
-		return rc;
-	}
-
-	cancel_delayed_work_sync(&chip->bc12_timeout_work);
-	if (!en)
-		schedule_delayed_work(&chip->bc12_timeout_work, BC12_TIMEOUT_MS);
-
-	return 0;
-}
-
 int sy6974b_get_iindet(struct sy6974b_chip *chip)
 {
 	int rc = 0;
-	u8 reg_val = 0;
+	int reg_val = 0;
 	bool is_complete = false;
 
 	if (!chip)
@@ -494,7 +377,7 @@ int sy6974b_get_iindet(struct sy6974b_chip *chip)
 bool sy6974b_get_bus_gd(struct sy6974b_chip *chip)
 {
 	int rc = 0;
-	u8 reg_val = 0;
+	int reg_val = 0;
 	bool bus_gd = false;
 
 	if (!chip)
@@ -622,7 +505,7 @@ static void sy6974b_event_work(struct work_struct *work)
 
 static void sy6974b_bc12_boot_check(struct sy6974b_chip *chip)
 {
-	u8 data;
+	int data;
 	int rc;
 
 	/* set vindpm thr to 4V */
@@ -690,6 +573,7 @@ int sy6974b_kick_wdt(struct sy6974b_chip *chip)
 	if (atomic_read(&chip->driver_suspended) == 1)
 		return 0;
 
+	chg_info("sy6974b_kick_wdt\n");
 	rc = sy6974b_write_byte_mask(chip, REG01_SY6974B_ADDRESS,
 					REG01_SY6974B_WDT_TIMER_RESET_MASK,
 					REG01_SY6974B_WDT_TIMER_RESET);
@@ -762,8 +646,9 @@ static int sy6974b_reg_dump(struct oplus_chg_ic_dev *ic_dev)
 		return -ENODEV;
 	}
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
-
+	mutex_lock(&chip->i2c_lock);
 	rc = regmap_bulk_read(chip->regmap, 0x00, buf, ARRAY_SIZE(buf));
+	mutex_unlock(&chip->i2c_lock);
 	if (rc < 0) {
 		chg_err("can't dump register, rc=%d", rc);
 		return rc;
@@ -838,11 +723,6 @@ static int sy6974b_rerun_bc12(struct oplus_chg_ic_dev *ic_dev)
 	chip->bc12_retry = true;
 	chip->auto_bc12 = false;
 	chip->bc12_complete = false;
-	rc = sy6974b_enable_hiz_mode(chip, false);
-	if (rc < 0) {
-		chg_err("can't disable hiz mode, rc=%d\n", rc);
-		goto err;
-	}
 	rc = sy6974b_write_byte_mask(chip, BC12_REG, BC12_RERUN_BIT, BC12_RERUN_BIT);
 	if (rc < 0) {
 		chg_err("can't rerun bc1.2, rc=%d", rc);
@@ -1020,7 +900,7 @@ static int sy6974b_otg_boost_enable(struct oplus_chg_ic_dev *ic_dev, bool en)
 static int sy6974b_get_usb_icl(struct sy6974b_chip *chip)
 {
 	int rc = 0;
-	u8 tmp = 0;
+	int tmp = 0;
 
 	if (!chip)
 		return 0;
@@ -1157,7 +1037,7 @@ static int sy6974b_set_otg_boost_curr_limit(struct oplus_chg_ic_dev *ic_dev, int
 	int rc;
 	struct sy6974b_chip *chip = oplus_chg_ic_get_drvdata(ic_dev);
 	int curr_ma = 0;
-	u8 val = REG02_SY6974B_OTG_CURRENT_LIMIT_500MA;
+	int val = REG02_SY6974B_OTG_CURRENT_LIMIT_500MA;
 
 	if (chip == NULL) {
 		chg_err("chip is NULL");
@@ -1220,7 +1100,7 @@ static int sy6974b_charging_current_write_fast(struct sy6974b_chip *chip, int ch
 
 static int sy6974b_get_charging_current(struct sy6974b_chip *chip, u32 *curr)
 {
-	u8 reg_val;
+	int reg_val;
 	int ichg;
 	int ret;
 
@@ -1254,7 +1134,7 @@ static int sy6974b_set_fcc(struct oplus_chg_ic_dev *ic_dev, int fcc_ma)
 static int sy6974b_set_fv(struct oplus_chg_ic_dev *ic_dev, int fv_mv)
 {
 	struct sy6974b_chip *chip = oplus_chg_ic_get_drvdata(ic_dev);
-	u8 val;
+	int val;
 
 	if(!chip)
 		return -1;
@@ -1272,7 +1152,7 @@ static int sy6974b_set_fv(struct oplus_chg_ic_dev *ic_dev, int fv_mv)
 static int sy6974b_get_fv(struct oplus_chg_ic_dev *ic_dev, int *fv_mv)
 {
 	struct sy6974b_chip *chip = oplus_chg_ic_get_drvdata(ic_dev);
-	u8 reg_val;
+	int reg_val;
 	int vchg;
 	int ret;
 
@@ -1362,7 +1242,7 @@ static int sy6974b_aicl_rerun(struct oplus_chg_ic_dev *ic_dev)
 
 int oplus_sy6974b_enter_shipmode(struct sy6974b_chip *chip, bool en)
 {
-	u8 val = 0;
+	int val = 0;
 	int rc = 0;
 
 	if(!chip)
@@ -1384,7 +1264,7 @@ int oplus_sy6974b_enter_shipmode(struct sy6974b_chip *chip, bool en)
 static int sy6974b_shipmode_enable(struct oplus_chg_ic_dev *ic_dev, bool en)
 {
 	struct sy6974b_chip *chip = oplus_chg_ic_get_drvdata(ic_dev);
-	u8 val = 0;
+	int val = 0;
 	int rc = 0;
 
 	if (chip == NULL)
@@ -1825,7 +1705,7 @@ static int sy6974b_chgdet_en(struct charger_device *chg_dev, bool en)
 int sy6974b_set_vindpm_vol(struct sy6974b_chip *chip, int vol)
 {
 	int rc = 0;
-	u8 tmp = 0;
+	int tmp = 0;
 	if (!chip)
 		return 0;
 
@@ -2113,7 +1993,7 @@ int sy6974b_set_prechg_voltage_threshold(struct sy6974b_chip *chip)
 
 	if (atomic_read(&chip->driver_suspended) == 1)
 		return 0;
-
+	chg_info("sy6974b_set_prechg_voltage_threshold\n");
 	rc = sy6974b_write_byte_mask(chip, REG01_SY6974B_ADDRESS,
 					REG01_SY6974B_SYS_VOL_LIMIT_MASK,
 					REG01_SY6974B_SYS_VOL_LIMIT_3400MV);
@@ -2237,7 +2117,7 @@ static int sy6974b_hardware_init(struct sy6974b_chip *chip)
 
 	sy6974b_set_vindpm_vol(chip, chip->hw_aicl_point);
 
-	sy6974b_set_otg_voltage(chip, REG06_SY6974B_OTG_VLIM_5300MV);
+	sy6974b_set_otg_voltage(chip, REG06_SY6974B_OTG_VLIM_5150MV);
 
 	sy6974b_batfet_reset_disable(chip, chip->batfet_reset_disable);
 	sy6974b_really_suspend_charger(chip, false);
@@ -2328,7 +2208,7 @@ static int sy6974b_inform_charger_type(struct sy6974b_chip *chip)
 int sy6974b_get_vbus_stat(struct sy6974b_chip *chip)
 {
 	int rc = 0;
-	u8 vbus_stat = 0;
+	int vbus_stat = 0;
 
 	if (!chip)
 		return 0;
@@ -2490,6 +2370,15 @@ static void sy6974b_bc12_retry_work(struct work_struct *work)
 	sy6974b_get_bc12(chip);
 }
 
+static void sy6974b_pre_event_work(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct sy6974b_chip *chip = container_of(dwork, struct sy6974b_chip, pre_event_work);
+
+	chip->vbus_present = true;
+	oplus_chg_ic_virq_trigger(chip->ic_dev, OPLUS_IC_VIRQ_CHG_TYPE_CHANGE);
+}
+
 static void oplus_chg_wakelock(struct sy6974b_chip *chip, bool awake)
 {
 	static bool pm_flag = false;
@@ -2550,6 +2439,7 @@ static int sy6974b_driver_probe(struct i2c_client *client,
 	INIT_WORK(&chip->otg_enabled_work, sy6974b_otg_enabled_work);
 	INIT_DELAYED_WORK(&chip->bc12_timeout_work, sy6974b_bc12_timeout_work);
 	INIT_DELAYED_WORK(&chip->bc12_retry_work, sy6974b_bc12_retry_work);
+	INIT_DELAYED_WORK(&chip->pre_event_work, sy6974b_pre_event_work);
 
 	chip->dpdm_reg = devm_regulator_get_optional(chip->dev, "dpdm");
 	if (IS_ERR(chip->dpdm_reg)) {
@@ -2652,6 +2542,10 @@ static int sy6974b_driver_probe(struct i2c_client *client,
 	else
 		schedule_delayed_work(&chip->event_work,
 			msecs_to_jiffies(chip->other_init_delay_ms));
+
+	if (sy6974b_get_bus_gd(chip))
+		schedule_delayed_work(&chip->pre_event_work,
+			msecs_to_jiffies(PRE_EVENT_WORK_DELAY_MS));
 
 	sy6974b_enable_irq(chip, true);
 	chg_info("success\n");
@@ -2758,7 +2652,7 @@ static int sy6974b_suspend(struct i2c_client *client, pm_message_t mesg)
 
 static void sy6974b_shutdown(struct i2c_client *client)
 {
-	u8 val = 0;
+	int val = 0;
 	struct sy6974b_chip *chip = i2c_get_clientdata(client);
 
 	/*
@@ -2774,6 +2668,8 @@ static void sy6974b_shutdown(struct i2c_client *client)
 		sy6974b_write_byte_mask(chip, REG07_SY6974B_ADDRESS,
 			REG07_SY6974B_BATFET_DIS_MASK, val);
 	}
+	if (chip->event_irq)
+		disable_irq(chip->event_irq);
 }
 
 static const struct of_device_id sy6974b_match[] = {

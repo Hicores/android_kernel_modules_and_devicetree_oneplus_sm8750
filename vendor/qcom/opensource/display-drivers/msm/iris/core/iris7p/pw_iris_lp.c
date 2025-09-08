@@ -184,7 +184,7 @@ int iris_esd_check_i7p(void)
 	};
 
 	if (pcfg->ocp_read_by_i2c && pcfg->iris_i2c_read) {
-		if (pcfg->iris_i2c_read(0xf1a00204, &value) < 0) {
+		if (pcfg->iris_i2c_read(0xf1640204, &value) < 0) {
 			IRIS_LOGE("%s(): iris i2c read fail", __func__);
 			rc = -1;
 			goto exit;

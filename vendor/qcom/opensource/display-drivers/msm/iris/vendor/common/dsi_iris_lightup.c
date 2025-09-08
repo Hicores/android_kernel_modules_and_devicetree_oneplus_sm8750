@@ -48,6 +48,27 @@ static struct iris_vendor_cfg gcfg_ext = {
 
 static void _iris_send_cont_splash_pkt(uint32_t type);
 
+static void _iris_i2c_preload_work(struct work_struct *work)
+{
+	struct iris_vendor_cfg *pcfg_ven = iris_get_vendor_cfg();
+
+	iris_get_cfg()->iris_i2c_preload = true;
+	iris_enable(pcfg_ven->panel, NULL);
+	iris_get_cfg()->iris_i2c_preload = false;
+}
+
+static void _iris_i2c_preload_work_init(void)
+{
+	struct iris_cfg *pcfg = iris_get_cfg();
+	struct iris_vendor_cfg *pcfg_ven = iris_get_vendor_cfg();
+
+	pcfg->iris_i2c_preload = false;
+
+	if (pcfg_ven->panel && pcfg->valid >= PARAM_PARSED
+			&& (pcfg_ven->panel->panel_mode == DSI_OP_VIDEO_MODE))
+		INIT_WORK(&iris_get_cfg()->iris_i2c_preload_work, _iris_i2c_preload_work);
+}
+
 void dsi_iris_acquire_panel_lock(void)
 {
 	struct iris_vendor_cfg *pcfg_ven = iris_get_vendor_cfg();
@@ -175,6 +196,7 @@ void iris_init(struct dsi_display *display, struct dsi_panel *panel)
 		IRIS_LOGE("%s(): unsupported chip type %d", __func__, pcfg->iris_chip_type);
 		break;
 	}
+	_iris_i2c_preload_work_init();
 }
 
 void iris_deinit(struct dsi_display *display)
@@ -536,17 +558,20 @@ int iris_lightup(struct dsi_panel *panel)
 
 	IRIS_ATRACE_BEGIN("iris_lightup");
 	ktime0 = ktime_get();
-	rc = dsi_display_clk_ctrl(display->dsi_clk_handle,
-			DSI_CORE_CLK | DSI_LINK_CLK, DSI_CLK_ON);
-	if (rc) {
-		IRIS_LOGE("%s(), failed to enable all DSI clocks for display: %s, return: %d",
-				__func__, display->name, rc);
-	}
 
-	rc = dsi_display_cmd_engine_enable(display);
-	if (rc) {
-		IRIS_LOGE("%s(), failed to enable cmd engine for display: %s, return: %d",
-				__func__, display->name, rc);
+	if (!pcfg->iris_i2c_preload) {
+		rc = dsi_display_clk_ctrl(display->dsi_clk_handle,
+				DSI_CORE_CLK | DSI_LINK_CLK, DSI_CLK_ON);
+		if (rc) {
+			IRIS_LOGE("%s(), failed to enable all DSI clocks for display: %s, return: %d",
+					__func__, display->name, rc);
+		}
+
+		rc = iris_display_engine_enable(display);
+		if (rc) {
+			IRIS_LOGE("%s(), failed to enable cmd engine for display: %s, return: %d",
+					__func__, display->name, rc);
+		}
 	}
 	if (pcfg->iris_chip_type == CHIP_IRIS5) {
 #if defined(CONFIG_PXLW_IRIS5)
@@ -605,16 +630,18 @@ int iris_lightup(struct dsi_panel *panel)
 
 	iris_tx_buf_to_vc_set(pcfg->vc_ctrl.vc_arr[VC_PT]);
 
-	rc = dsi_display_cmd_engine_disable(display);
-	if (rc) {
-		IRIS_LOGE("%s(), failed to disable cmd engine for display: %s, return: %d",
-				__func__, display->name, rc);
-	}
-	rc = dsi_display_clk_ctrl(display->dsi_clk_handle,
-			DSI_CORE_CLK | DSI_LINK_CLK, DSI_CLK_OFF);
-	if (rc) {
-		IRIS_LOGE("%s(), failed to disable all DSI clocks for display: %s, return: %d",
-				__func__, display->name, rc);
+	if (!pcfg->iris_i2c_preload) {
+		rc = iris_display_engine_disable(display);
+		if (rc) {
+			IRIS_LOGE("%s(), failed to disable cmd engine for display: %s, return: %d",
+					__func__, display->name, rc);
+		}
+		rc = dsi_display_clk_ctrl(display->dsi_clk_handle,
+				DSI_CORE_CLK | DSI_LINK_CLK, DSI_CLK_OFF);
+		if (rc) {
+			IRIS_LOGE("%s(), failed to disable all DSI clocks for display: %s, return: %d",
+					__func__, display->name, rc);
+		}
 	}
 
 	iris_update_last_pt_timing();
@@ -751,14 +778,11 @@ int iris_enable(struct dsi_panel *panel, struct iris_cmd_set *on_cmds)
 #endif
 		iris_sleep_abyp_power_down();
 
-		if (IRIS_IF_LOGI())
-			ktime2 = ktime_get();
 		if (IRIS_IF_LOGI()) {
-			timeus0 = (u32) ktime_to_us(ktime1) - (u32)ktime_to_us(ktime0);
-			timeus1 = (u32) ktime_to_us(ktime2) - (u32)ktime_to_us(ktime1);
+			ktime2 = ktime_get();
+			ktime3 = ktime_get();
+			ktime4 = ktime_get();
 		}
-		IRIS_LOGI("%s(), iris takes total %d us, prepare %d us, low power %d us",
-				__func__, timeus0 + timeus1, timeus0, timeus1);
 	} else {
 #ifdef IRIS_WA_FOR_IRIS8_A0
 #if defined(CONFIG_PXLW_IRIS8)
@@ -783,7 +807,6 @@ int iris_enable(struct dsi_panel *panel, struct iris_cmd_set *on_cmds)
 			iris_fpga_type_get();
 _iris_lightup:
 		rc = iris_lightup(panel);
-		pcfg->abyp_ctrl.abypass_mode = PASS_THROUGH_MODE;
 		pcfg->iris_initialized = true;
 		if (pcfg->iris_i2c_preload) {
 			if (IRIS_IF_LOGI()) {
@@ -792,6 +815,7 @@ _iris_lightup:
 			}
 			goto iris_enable_exit;
 		}
+		pcfg->abyp_ctrl.abypass_mode = PASS_THROUGH_MODE;
 		if (IRIS_IF_LOGI())
 			ktime3 = ktime_get();
 
@@ -809,23 +833,25 @@ _iris_lightup:
 			if (prev_mode == ANALOG_BYPASS_MODE)
 				iris_abyp_switch_proc(ANALOG_BYPASS_MODE);
 		}
-iris_enable_exit:
-		if (IRIS_IF_LOGI()) {
-			timeus0 = (u32) ktime_to_us(ktime1) - (u32)ktime_to_us(ktime0);
-			timeus1 = (u32) ktime_to_us(ktime2) - (u32)ktime_to_us(ktime1);
-			timeus2 = (u32) ktime_to_us(ktime3) - (u32)ktime_to_us(ktime2);
-			timeus3 = (u32) ktime_to_us(ktime4) - (u32)ktime_to_us(ktime3);
-			timeus4 = (u32) ktime_to_us(ktime_get()) - (u32)ktime_to_us(ktime4);
-		}
-		IRIS_LOGI("%s(), iris takes total %d us, prepare %d us, enter PT %d us,"
-				" light up %d us, exit PT %d us.",
-				__func__,
-				timeus0 + timeus1 + timeus2 + timeus4,
-				timeus0, timeus1, timeus2, timeus4);
-		if (on_cmds != NULL) {
-			IRIS_LOGI("Send panel cmd takes %d us.", timeus3);
-		}
 	}
+
+iris_enable_exit:
+	if (IRIS_IF_LOGI()) {
+		timeus0 = (u32) ktime_to_us(ktime1) - (u32)ktime_to_us(ktime0);
+		timeus1 = (u32) ktime_to_us(ktime2) - (u32)ktime_to_us(ktime1);
+		timeus2 = (u32) ktime_to_us(ktime3) - (u32)ktime_to_us(ktime2);
+		timeus3 = (u32) ktime_to_us(ktime4) - (u32)ktime_to_us(ktime3);
+		timeus4 = (u32) ktime_to_us(ktime_get()) - (u32)ktime_to_us(ktime4);
+	}
+	IRIS_LOGI("%s(), iris takes total %d us, prepare %d us, enter PT %d us,"
+			" light up %d us, exit PT %d us.",
+			__func__,
+			timeus0 + timeus1 + timeus2 + timeus4,
+			timeus0, timeus1, timeus2, timeus4);
+
+	if (on_cmds != NULL)
+		IRIS_LOGI("Send panel cmd takes %d us.", timeus3);
+
 	IRIS_ATRACE_END("iris_enable");
 
 end:
@@ -933,41 +959,44 @@ static void _iris_send_cont_splash_pkt(uint32_t type)
 	uint32_t size = 0;
 	const int iris_max_opt_cnt = 30;
 	struct iris_ctrl_opt *opt_arr = NULL;
-	struct iris_cfg *pcfg = NULL;
+	struct iris_cfg *pcfg = iris_get_cfg();
 	struct iris_ctrl_seq *pseq_cs = NULL;
 	struct iris_vendor_cfg *pcfg_ven = iris_get_vendor_cfg();
 
 	size = IRIS_IP_CNT * iris_max_opt_cnt * sizeof(struct iris_ctrl_opt);
-	opt_arr = vmalloc(size);
-	if (opt_arr == NULL) {
-		IRIS_LOGE("%s(), failed to malloc buffer!", __func__);
-		return;
-	}
-
-	pcfg = iris_get_cfg();
-	memset(opt_arr, 0xff, size);
 
 	if (type == IRIS_CONT_SPLASH_LK) {
 		pseq_cs = _iris_get_ctrl_seq_cs(pcfg);
 		if (!pseq_cs) {
 			IRIS_LOGE("%s(), invalid pseq_cs", __func__);
-			vfree(opt_arr);
 			return;
 		}
 
 		iris_send_assembled_pkt(pseq_cs->ctrl_opt, pseq_cs->cnt);
 	} else if (type == IRIS_CONT_SPLASH_KERNEL) {
+		opt_arr = vmalloc(size);
+		if (opt_arr == NULL) {
+			IRIS_LOGE("%s(), failed to malloc buffer!", __func__);
+			return;
+		}
+		memset(opt_arr, 0xff, size);
+
 		iris_lp_enable_pre();
 		seq_cnt = _iris_select_cont_splash_ipopt(type, opt_arr);
 		iris_send_assembled_pkt(opt_arr, seq_cnt);
 		iris_lp_enable_post();
 		_iris_read_chip_id();
-	} else if (type == IRIS_CONT_SPLASH_BYPASS_PRELOAD) {
-		if (pcfg_ven && pcfg_ven->panel)
-			iris_enable(pcfg_ven->panel, NULL);
-	}
 
-	vfree(opt_arr);
+		vfree(opt_arr);
+	} else if (type == IRIS_CONT_SPLASH_BYPASS_PRELOAD) {
+		if (pcfg->rx_mode == IRIS_VIDEO_MODE) {
+			iris_reset_sys_domain();
+			schedule_work(&pcfg->iris_i2c_preload_work);
+		} else {
+			if (pcfg_ven && pcfg_ven->panel)
+				iris_enable(pcfg_ven->panel, NULL);
+		}
+	}
 }
 
 void iris_send_cont_splash(struct dsi_display *display)
@@ -1066,9 +1095,9 @@ uint32_t iris_schedule_line_no_get(void)
 	struct iris_vendor_cfg *pcfg_ven = iris_get_vendor_cfg();
 
 	if ((pcfg->frc_enabled) || (pcfg->pwil_mode == FRC_MODE))
-		schedule_line_no = pcfg->ovs_delay_frc;
+		schedule_line_no = pcfg->ovs_delay_frc + 1;
 	else
-		schedule_line_no = pcfg->ovs_delay;
+		schedule_line_no = pcfg->ovs_delay + 1;
 
 	panel_vsw_vbp = pcfg_ven->panel->cur_mode->timing.v_back_porch +
 			pcfg_ven->panel->cur_mode->timing.v_sync_width;
@@ -1520,6 +1549,8 @@ int iris_dsi_send_cmds(struct iris_cmd_desc *cmds,
 
 		if (state == IRIS_CMD_SET_STATE_LP)
 			cmds->msg.flags |= MIPI_DSI_MSG_USE_LPM;
+		else
+			cmds->msg.flags &= ~MIPI_DSI_MSG_USE_LPM;
 
 		cmds->last_command ? pcfg->iris_set_msg_flags(cmds, LAST_FLAG)
 			: pcfg->iris_set_msg_flags(cmds, BATCH_FLAG);

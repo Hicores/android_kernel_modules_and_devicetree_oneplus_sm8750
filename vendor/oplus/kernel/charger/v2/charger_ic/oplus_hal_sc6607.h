@@ -845,6 +845,14 @@ static const struct reg_field sc6607_reg_fields[] = {
 	[F_PHY_RST] = REG_FIELD(SC6607_REG_PHY_CTRL, 1, 1),
 };
 
+#define IBUS_2A	2000
+#define IBUS_3A	3000
+#define VBUS_5V	5000
+#define VBUS_9V	9000
+#define DEFAULT_CURR_BY_CC	100
+#define SINK_SUSPEND_CURRENT	5
+#define SUSPEND_RECOVERY_DELAY_MS	2000
+
 #ifdef CONFIG_OPLUS_CHARGER_MTK
 void Charger_Detect_Init(void);
 void Charger_Detect_Release(void);

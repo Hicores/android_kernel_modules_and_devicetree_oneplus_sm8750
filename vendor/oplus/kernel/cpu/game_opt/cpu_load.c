@@ -265,10 +265,16 @@ static u64 last_read = 0;
 static void read_cpu_load_data(void)
 {
 	int cpu;
-	int util_pct = 0, busy_pct = 0;
+	int util_pct = 60, busy_pct = 90;
 	u64 now = ktime_get_ns();
 	u64 delta = now - last_read;
 	int interval;
+	bool just_init = false;
+
+	if (!initialized) {
+		time_in_state_init();
+		just_init = true;
+	}
 
 	if (delta > 1000000000) /* 1s */
 		delta = 1000000000;
@@ -279,7 +285,7 @@ static void read_cpu_load_data(void)
 	clb_len = 0;
 
 	for_each_possible_cpu(cpu) {
-		if (need_stat_cpu_load())
+		if (need_stat_cpu_load() && !just_init)
 			get_cpu_load(cpu, &util_pct, &busy_pct);
 		clb_len += snprintf(cpu_load_buf + clb_len, sizeof(cpu_load_buf) - clb_len,
 			"CPU:%d busy_pct:%d util_pct:%d\n", cpu, busy_pct, util_pct);
@@ -367,8 +373,6 @@ static const struct proc_ops gamt_proc_ops = {
 
 int cpu_load_init(void)
 {
-	time_in_state_init();
-
 	proc_create_data("cpu_load", 0444, game_opt_dir, &cpu_load_proc_ops, NULL);
 	proc_create_data("gamt", 0664, game_opt_dir, &gamt_proc_ops, NULL);
 

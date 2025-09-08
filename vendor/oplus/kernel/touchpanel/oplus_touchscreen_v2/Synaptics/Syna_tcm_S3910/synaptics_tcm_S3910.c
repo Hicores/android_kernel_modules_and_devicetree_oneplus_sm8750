@@ -41,7 +41,7 @@ static int syna_long_large_zone_handle_func(void *chip_data,
 static int syna_short_large_zone_handle_func(void *chip_data,
 		struct grip_zone_area *grip_zone,
 		bool enable);
-
+static int syna_tcm_reset(void *chip_data);
 static int syna_set_fw_grip_area(void *chip_data,
 				 struct grip_zone_area *grip_zone,
 				 bool enable);
@@ -2547,6 +2547,8 @@ static int syna_tcm_get_dynamic_config(struct syna_tcm_data *tcm_info,
 
 	if (retval < 0 || resp_length < 2) {
 		retval = -EINVAL;
+		syna_tcm_reset(tcm_info); /*ic state err, need to reset the IC*/
+		tp_healthinfo_report(tcm_info->monitor_data, HEALTH_REPORT, "ic state err rest");
 		TP_INFO(tcm_info->tp_index, "Failed to read dynamic config\n");
 		report = tp_kzalloc(30, GFP_KERNEL);
 		if (report) {
@@ -3301,8 +3303,6 @@ static int syna_tcm_set_game_mode(struct syna_tcm_data *tcm_info, int enable)
 	struct touchpanel_data *ts = spi_get_drvdata(tcm_info->client);
 	/*unsigned short noise_length = 0;*/
 
-	syna_tcm_set_dynamic_config(tcm_info, SYNA_CMD_GAME_AIUINIT_EN, enable);
-	msleep(1);
 	tcm_info->game_mode = !!enable;
 	retval = syna_tcm_get_dynamic_config(tcm_info, DC_ERROR_PRIORITY, &regval);
 	if (retval < 0) {
@@ -8167,7 +8167,9 @@ static void syna_aiunit_game_info(void *chip_data)
 		return;
 	}
 	if (tcm_info->ts->aiunit_game_enable) {
-		ret = syna_tcm_set_dynamic_config(tcm_info, SYNA_CMD_GAME_AIUINIT_EN, 1);
+		ret = syna_tcm_get_dynamic_config(tcm_info, SYNA_CMD_GAME_AIUINIT_EN, &regval);
+		msleep(3);
+		ret = syna_tcm_set_dynamic_config(tcm_info, SYNA_CMD_GAME_AIUINIT_EN, regval|0x01);
 		msleep(3);
 		ret = syna_tcm_get_dynamic_config(tcm_info, SYNA_CMD_GAME_AIUINIT_EN, &regval);
 		if (regval == 1) {
@@ -8176,8 +8178,6 @@ static void syna_aiunit_game_info(void *chip_data)
 			TPD_INFO("%s: aiunit game info enter fail.\n", __func__);
 		}
 	} else {
-		ret = syna_tcm_set_dynamic_config(tcm_info, SYNA_CMD_GAME_AIUINIT_EN, 0);
-		msleep(3);
 		ret = syna_tcm_get_dynamic_config(tcm_info, SYNA_CMD_GAME_AIUINIT_EN, &regval);
 		if (regval == 0) {
 			TPD_INFO("%s: aiunit game info exit suc.\n", __func__);

@@ -368,16 +368,6 @@ void oplus_panel_backlight_demura_dbv_switch(struct dsi_panel *panel, u32 bl_lvl
 			panel->oplus_panel.bl_demura_mode = 1;
 			bl_demura_mode = DSI_CMD_DEMURA_DBV_MODE1;
 		}
-
-		custom_cmd_set = panel->cur_mode->priv_info->cmd_sets[bl_demura_mode];
-		tx_buf = (char*)custom_cmd_set.cmds[custom_cmd_set.count - 1].msg.tx_buf;
-
-		if (tx_buf[0] == 0x51) {
-			tx_buf[1] = (bl_lvl >> 8);
-			tx_buf[2] = (bl_lvl & 0xFF);
-		} else {
-			OPLUS_DSI_INFO("invaild format of cmd %s\n", cmd_set_prop_map[bl_demura_mode]);
-		}
 	} else {
 		if (bl_lvl <= 3515)
 			return;

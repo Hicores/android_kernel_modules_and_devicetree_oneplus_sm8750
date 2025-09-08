@@ -2,7 +2,7 @@
 /*
  * Copyright (C) 2018-2022 Oplus. All rights reserved.
  */
-#define pr_fmt(fmt) "[sc6607]:%s: " fmt, __func__
+#define pr_fmt(fmt) "[sc6607]:[%s][%d]: " fmt, __func__, __LINE__
 
 #include <linux/platform_device.h>
 #include <linux/errno.h>
@@ -142,15 +142,27 @@ error:
 	return rc;
 }
 
+#define I2C_MSG_LEN	2
 static int sc6607_read_data(struct sc6607 *chip, u8 addr, u8 *buf, int len)
 {
 	int rc = 0;
+	struct i2c_msg msg[I2C_MSG_LEN] = {0};
 
 	if (!chip)
 		return -EINVAL;
 
+	msg[0].addr = chip->client->addr;
+	msg[0].flags = 0;
+	msg[0].len = 1;
+	msg[0].buf = &addr;
+
+	msg[1].addr = chip->client->addr;
+	msg[1].flags = I2C_M_RD;
+	msg[1].len = len;
+	msg[1].buf = buf;
+
 	mutex_lock(&chip->i2c_rw_lock);
-	rc = i2c_smbus_read_i2c_block_data(chip->client, addr, len, buf);
+	rc = i2c_transfer(chip->client->adapter, msg, I2C_MSG_LEN);
 	if (rc < 0) {
 		chg_err("read 0x%02x error, rc=%d\n", addr, rc);
 		sc6607_i2c_error(chip, true, true);

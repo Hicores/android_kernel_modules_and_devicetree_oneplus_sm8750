@@ -4355,6 +4355,7 @@ static void oplus_ufcs_monitor_work(struct work_struct *work)
 				goto exit;
 			}
 		}
+		oplus_ufcs_cp_watchdog_reset(chip);
 		delay = rc;
 	} else {
 		rc = oplus_ufcs_get_batt_temp_curr(chip);

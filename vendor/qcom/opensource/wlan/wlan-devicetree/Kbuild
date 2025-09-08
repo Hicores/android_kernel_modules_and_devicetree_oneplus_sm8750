@@ -7,14 +7,9 @@ ifeq ($(CONFIG_ARCH_SUN),y)
 dtbo-y += sun-kiwi-cnss.dtbo
 dtbo-y += sun-kiwi-cnss-v8.dtbo
 dtbo-y += sun-peach-cnss.dtbo
-ifeq ($(OPLUS_WIFI_ONLY),true)
-dtbo-y += oplus/erhai_sun-peach-cnss-v8-overlay.dtbo
-else
 dtbo-y += sun-peach-cnss-v8.dtbo
-endif
 dtbo-y += sunp-hdk-peach-cnss-v8.dtbo
 # ifdef OPLUS_FEATURE_WIFI_BDF
-dtbo-y += oplus/hummer_sun-peach-cnss-v8-overlay.dtbo
 dtbo-y += oplus/pagani_sun-peach-cnss-v8-overlay.dtbo
 # endif /* OPLUS_FEATURE_WIFI_BDF */
 endif

@@ -290,7 +290,7 @@ static ssize_t file_record_proc_write(struct file *file, const char __user *buf,
 	spin_lock_irqsave(&node_lock, flags);
 	if (!strcmp(cmd, "-add") && name) {
 		if (process_count < MAX_PROCESSES) {
-			process_names[process_count] = kmalloc(TASK_COMM_LEN, GFP_KERNEL);
+			process_names[process_count] = kmalloc(TASK_COMM_LEN, GFP_ATOMIC);
 			if (!process_names[process_count]) {
 				spin_unlock_irqrestore(&node_lock, flags);
 				kfree(orig);

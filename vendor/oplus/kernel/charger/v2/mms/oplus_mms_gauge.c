@@ -38,6 +38,7 @@
 #include <linux/sched/clock.h>
 #include "gauge/oplus_gauge_common.h"
 #include <oplus_sec.h>
+#include <oplus_chg_cpa.h>
 
 #ifndef CONFIG_OPLUS_CHARGER_MTK
 #include <linux/soc/qcom/smem.h>
@@ -5448,6 +5449,37 @@ static void oplus_mms_gauge_subscribe_wls_topic(struct oplus_mms *topic, void *p
 		schedule_work(&chip->update_change_work);
 }
 
+static void oplus_mms_gauge_cpa_subs_callback(struct mms_subscribe *subs,
+					      enum mms_msg_type type, u32 id, bool sync)
+{
+	struct oplus_mms_gauge *chip = subs->priv_data;
+
+	switch (type) {
+	case MSG_TYPE_ITEM:
+		switch (id) {
+		case CPA_ITEM_POWER:
+			chg_info("cpa set power\n");
+			schedule_work(&chip->gauge_set_curve_work);
+			break;
+		default:
+			break;
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+static void oplus_mms_gauge_subscribe_cpa_topic(struct oplus_mms *topic, void *prv_data)
+{
+	struct oplus_mms_gauge *chip = prv_data;
+
+	chip->cpa_topic = topic;
+	chip->cpa_subs = oplus_mms_subscribe(chip->cpa_topic, chip, oplus_mms_gauge_cpa_subs_callback, "mms_gauge");
+	if (IS_ERR_OR_NULL(chip->cpa_subs))
+		chg_err("subscribe cpa topic error, rc=%ld\n", PTR_ERR(chip->cpa_subs));
+}
+
 #define GAUGE_NAME_LENGTH 10
 static int oplus_mms_gauge_topic_init(struct oplus_mms_gauge *chip)
 {
@@ -5539,6 +5571,7 @@ static int oplus_mms_gauge_topic_init(struct oplus_mms_gauge *chip)
 	oplus_mms_wait_topic("parallel", oplus_mms_gauge_subscribe_parallel_topic, chip);
 	oplus_mms_wait_topic("wireless", oplus_mms_gauge_subscribe_wls_topic, chip);
 	oplus_mms_wait_topic("batt_bal", oplus_mms_gauge_subscribe_batt_bal_topic, chip);
+	oplus_mms_wait_topic("cpa", oplus_mms_gauge_subscribe_cpa_topic, chip);
 
 	if (chip->deep_spec.limit_curr_curves.nums <= 0) {
 		rc = oplus_mms_set_item_disable(chip->gauge_topic, GAUGE_ITEM_RATIO_LIMIT_CURR);
@@ -5847,6 +5880,8 @@ static int oplus_mms_gauge_remove(struct platform_device *pdev)
 		oplus_mms_unsubscribe(chip->wired_subs);
 	if (!IS_ERR_OR_NULL(chip->gauge_subs))
 		oplus_mms_unsubscribe(chip->gauge_subs);
+	if (!IS_ERR_OR_NULL(chip->cpa_subs))
+		oplus_mms_unsubscribe(chip->cpa_subs);
 	for (i = 0; i < chip->ddrc_num; i++) {
 		if (chip->ddrc_strategy[i] != NULL)
 			oplus_chg_strategy_release(chip->ddrc_strategy[i]);

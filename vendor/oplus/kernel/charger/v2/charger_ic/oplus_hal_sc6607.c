@@ -2,7 +2,7 @@
 /*
  * Copyright (C) 2022-2023 Oplus. All rights reserved.
  */
-#define pr_fmt(fmt) "[sc6607]:%s: " fmt, __func__
+#define pr_fmt(fmt) "[sc6607]:[%s][%d]: " fmt, __func__, __LINE__
 #include <linux/gpio.h>
 #include <linux/i2c.h>
 #include <linux/init.h>
@@ -46,6 +46,8 @@
 #include <oplus_chg.h>
 #include <ufcs_class.h>
 #include "oplus_hal_sc6607.h"
+#include <oplus_chg_pps.h>
+#include <tcpm.h>
 #include "../voocphy/oplus_voocphy.h"
 
 #ifdef CONFIG_OPLUS_CHARGER_MTK
@@ -173,7 +175,6 @@ struct sc6607 {
 	struct delayed_work hk_err_load_trigger_work;
 	struct delayed_work hw_bc12_detect_work;
 	struct delayed_work init_status_work;
-	struct delayed_work sc6607_aicr_setting_work;
 	struct delayed_work init_status_check_work;
 	struct delayed_work tcpc_complete_work;
 	struct delayed_work get_voocphy_info_work;
@@ -183,15 +184,10 @@ struct sc6607 {
 	bool pr_swap;
 	bool disable_tcpc_irq;
 #ifdef CONFIG_OPLUS_CHARGER_MTK
-	int pd_type;
 	struct adapter_device *pd_adapter;
 	struct mutex charger_pd_lock;
 	struct charger_device *chg_dev;
 #endif
-	int aicr;
-	int pd_curr_max;
-	int main_curr_max;
-	int charger_current_pre;
 	bool disable_qc;
 	bool pdqc_setup_5v;
 	int  qc_to_9v_count;
@@ -224,6 +220,13 @@ struct sc6607 {
 
 	struct tcpc_device *tcpc;
 	struct notifier_block pd_nb;
+
+	int cap_nr;
+	int pd_type;
+	int pd_chg_volt;
+	pd_msg_data pdo[PPS_PDO_MAX];
+	struct delayed_work sourcecap_done_work;
+	struct delayed_work charger_suspend_recovery_work;
 };
 
 struct sc6607_alert_handler {
@@ -332,6 +335,90 @@ static const struct charger_properties  sc6607_chg_props = {
 	.alias_name = "sc6607",
 };
 #endif
+
+static int oplus_chg_suspend_charger(bool suspend, const char *client_str)
+{
+	struct votable *suspend_votable;
+	int rc;
+
+	suspend_votable = find_votable("WIRED_CHARGE_SUSPEND");
+	if (!suspend_votable) {
+		chg_err("WIRED_CHARGE_SUSPEND votable not found\n");
+		return -EINVAL;
+	}
+
+	rc = vote(suspend_votable, client_str, suspend, 1, false);
+	if (rc < 0)
+		chg_err("%s charger error, rc = %d\n",
+		        suspend ? "suspend" : "unsuspend", rc);
+	else
+		chg_info("%s charger\n", suspend ? "suspend" : "unsuspend");
+
+	return rc;
+}
+
+static int oplus_chg_set_icl_by_vote(int icl, const char *client_str)
+{
+	struct votable *icl_votable;
+	int rc;
+
+	icl_votable = find_votable("WIRED_ICL");
+	if (!icl_votable) {
+		chg_err("WIRED_ICL votable not found\n");
+		return -EINVAL;
+	}
+
+	rc = vote(icl_votable, client_str, true, icl, true);
+	if (rc < 0)
+		chg_err("set icl error: icl = %d, rc = %d\n", icl, rc);
+	else
+		chg_info("real icl = %d\n", icl);
+
+	return rc;
+}
+
+static void oplus_charger_suspend_recovery_work(struct work_struct *work)
+{
+	chg_info("voted suspend recovery, unsuspend\n");
+	oplus_chg_suspend_charger(false, PD_PDO_ICL_VOTER);
+	oplus_chg_suspend_charger(false, USB_IBUS_DRAW_VOTER);
+	oplus_chg_suspend_charger(false, TCPC_IBUS_DRAW_VOTER);
+}
+
+static int oplus_get_max_current_from_fixed_pdo(struct sc6607 *chip, int volt)
+{
+	int i = 0;
+	if (chip->pdo[0].pdo_data == 0) {
+		chg_err("get pdo info error\n");
+		return -EINVAL;
+	}
+
+	for (i = 0; i < (PPS_PDO_MAX - 1); i++) {
+		if (chip->pdo[i].pdo_type != USBPD_PDMSG_PDOTYPE_FIXED_SUPPLY)
+			continue;
+
+		if (volt <= PD_PDO_VOL(chip->pdo[i].voltage_50mv)) {
+			chg_info("SourceCap[%d]: %08X, FixedSupply PDO V=%d mV, I=%d mA,"
+				"UsbCommCapable=%d, USBSuspendSupported:%d\n", i,
+				chip->pdo[i].pdo_data, PD_PDO_VOL(chip->pdo[i].voltage_50mv),
+				PD_PDO_CURR_MAX(chip->pdo[i].max_current_10ma),
+				chip->pdo[i].usb_comm_capable, chip->pdo[i].usb_suspend_supported);
+			return PD_PDO_CURR_MAX(chip->pdo[i].max_current_10ma);
+		}
+	}
+	return -EINVAL;
+}
+
+static void oplus_sourcecap_done_work(struct work_struct *work)
+{
+	struct sc6607 *chip = container_of(work, struct sc6607, sourcecap_done_work.work);
+	int max_pdo_current = 0;
+
+	/*set default input current from pdo*/
+	max_pdo_current = oplus_get_max_current_from_fixed_pdo(chip, VBUS_5V);
+	if (max_pdo_current >= 0)
+		oplus_chg_set_icl_by_vote(max_pdo_current, PD_PDO_ICL_VOTER);
+}
 
 static int oplus_chg_get_vooc_charging(void)
 {
@@ -636,6 +723,21 @@ static int sc6607_bc12_timeout_cancel(struct sc6607 *chip)
 	chg_info("del bc12_timeout\n");
 	del_timer(&chip->bc12_timeout);
 	return 0;
+}
+
+static int oplus_chg_get_cp_enable(struct sc6607 *chip)
+{
+	u8 cp_enable = 0;
+	int ret = 0;
+
+	if (!chip)
+		return 0;
+
+	ret = sc6607_field_read(chip, F_CP_EN, &cp_enable);
+	if (ret < 0)
+		chg_info("read F_CP_EN fail, ret=%d\n", ret);
+
+	return cp_enable;
 }
 
 static int bc12_update_dpdm_state(struct sc6607 *chip)
@@ -2304,7 +2406,6 @@ static int sc6607_hk_irq_handle(struct sc6607 *chip)
 		}
 		sc6607_field_write(chip, F_VBUS_PD, 0);
 		sc6607_enable_enlim(chip);
-		sc6607_set_input_current_limit(chip, min(SC6607_DEFAULT_MIN_IBUS_100MA, chip->pd_curr_max));
 		if (atomic_read(&chip->charger_suspended))
 			oplus_sc6607_charger_suspend(chip);
 		sc6607_inform_charger_type(chip);
@@ -2337,7 +2438,7 @@ static int sc6607_hk_irq_handle(struct sc6607 *chip)
 					bc12_detect_run(chip);
 				else {
 					if (chip->hw_bc12_detect_work.work.func)
-						schedule_delayed_work(&chip->hw_bc12_detect_work, msecs_to_jiffies(100));
+						schedule_delayed_work(&chip->hw_bc12_detect_work, msecs_to_jiffies(140));
 				}
 			}
 		}
@@ -2358,7 +2459,6 @@ static int sc6607_hk_irq_handle(struct sc6607 *chip)
 			bc12_set_dp_state(chip, DPDM_HIZ);
 			bc12_set_dm_state(chip, DPDM_HIZ);
 		}
-		sc6607_set_input_current_limit(chip, SC6607_DEFAULT_MIN_IBUS_100MA);
 
 		mutex_lock(&chip->bc12.running_lock);
 		chip->bc12.detect_ing = false;
@@ -2369,8 +2469,6 @@ static int sc6607_hk_irq_handle(struct sc6607 *chip)
 		chip->oplus_chg_type = POWER_SUPPLY_TYPE_UNKNOWN;
 		chip->hvdcp_can_enabled = false;
 		chip->qc_to_9v_count = 0;
-		chip->charger_current_pre = -1;
-		chip->aicr = SC6607_DEFAULT_MIN_IBUS_100MA;
 
 #ifdef CONFIG_OPLUS_CHARGER_MTK
 		oplus_chg_pullup_dp_set(false);
@@ -3201,6 +3299,7 @@ static int oplus_sc6607_set_aicr(struct sc6607 *chip, int current_ma)
 	int chg_type = 0;
 	int charger_type;
 	bool present = false;
+	int max_pdo_current;
 
 	if (!chip)
 		return -EINVAL;
@@ -3229,16 +3328,8 @@ static int oplus_sc6607_set_aicr(struct sc6607 *chip, int current_ma)
 	}
 
 	aicl_point_temp = aicl_point;
-	current_ma = min(chip->main_curr_max, chip->pd_curr_max);
-	chg_info("usb input max current limit=%d, aicl_point_temp=%d g_charger_current_pre=%d\n", current_ma,
-			aicl_point_temp, chip->charger_current_pre);
-
-	if (chip->charger_current_pre == current_ma) {
-		chg_err("charger_current_pre == current_ma = %d.\n", current_ma);
-		return 0;
-	} else {
-		chip->charger_current_pre = current_ma;
-	}
+	chg_info("usb input max current limit=%d, aicl_point_temp=%d \n", current_ma,
+			aicl_point_temp);
 
 	if (current_ma <= 0) {
 		sc6607_set_input_current_limit(chip, 0);
@@ -3258,6 +3349,23 @@ static int oplus_sc6607_set_aicr(struct sc6607 *chip, int current_ma)
 			}
 			rc = oplus_chg_usb_set_input_current(chip, current_ma, aicl_point);
 			goto aicl_rerun;
+		}
+	}
+
+	if (oplus_chg_get_common_charge_icl_support_flags()) {
+		max_pdo_current = oplus_get_max_current_from_fixed_pdo(chip, chip->pd_chg_volt);
+		chg_info("max_pdo_current:%d ma\n", max_pdo_current);
+
+		if (max_pdo_current >= 0)
+			current_ma = min(current_ma, max_pdo_current);
+		if (current_ma < DEFAULT_CURR_BY_CC) {
+			cancel_delayed_work_sync(&chip->charger_suspend_recovery_work);
+			oplus_chg_suspend_charger(true, PD_PDO_ICL_VOTER);
+			schedule_delayed_work(&chip->charger_suspend_recovery_work,
+			                      msecs_to_jiffies(SUSPEND_RECOVERY_DELAY_MS));
+			goto aicl_rerun;
+		} else {
+			oplus_chg_suspend_charger(false, PD_PDO_ICL_VOTER);
 		}
 	}
 
@@ -3342,13 +3450,11 @@ static int oplus_sc6607_set_aicr(struct sc6607 *chip, int current_ma)
 
 aicl_pre_step:
 	sc6607_set_input_current_limit(chip, usb_icl[i]);
-	chip->charger_current_pre = usb_icl[i];
 	chg_info("aicl_pre_step: current limit aicl chg_vol = %d j[%d] = %d sw_aicl_point:%d, \
 		main %d mA, slave %d mA\n",
 		chg_vol, i, usb_icl[i], aicl_point_temp, main_cur, slave_cur);
 	return rc;
 aicl_end:
-	chip->charger_current_pre = usb_icl[i];
 	sc6607_set_input_current_limit(chip, usb_icl[i]);
 	chg_info("aicl_end: current limit aicl chg_vol = %d j[%d] = %d sw_aicl_point:%d, \
 		main %d mA, slave %d mA\n",
@@ -3357,36 +3463,12 @@ aicl_rerun:
 	return rc;
 }
 
-static int oplus_sc6607_chg_set_aicr(struct sc6607 *chip, int current_ma)
-{
-	if (!chip)
-		return -EINVAL;
-
-	chip->main_curr_max = current_ma;
-	return oplus_sc6607_set_aicr(chip, chip->main_curr_max);
-}
-
-static int oplus_sc6607_set_input_current_limit(struct sc6607 *chip, int current_ma)
-{
-	int ret;
-
-	if (!chip)
-		return -EINVAL;
-
-	chg_info("current = %d\n", current_ma);
-	chip->aicr = current_ma;
-	ret = oplus_sc6607_chg_set_aicr(chip, current_ma);
-
-	return ret;
-}
-
 static int oplus_sc6607_charging_disable(struct sc6607 *chip)
 {
 	if (!chip)
 		return -EINVAL;
 
 	chg_info("disable");
-	chip->charger_current_pre = -1;
 	sc6607_disable_watchdog_timer(chip);
 	chip->hw_aicl_point = SC6607_HW_AICL_POINT_VOL_5V_PHASE1;
 	sc6607_set_input_volt_limit(chip, chip->hw_aicl_point);
@@ -3602,14 +3684,6 @@ static void sc6607_check_ic_suspend(struct sc6607 *chip)
 		if (!val)
 			sc6607_field_write(chip, F_PERFORMANCE_EN, true);
 	}
-}
-
-static void sc6607_aicr_setting_work_callback(struct work_struct *work)
-{
-	struct delayed_work *dwork = to_delayed_work(work);
-	struct sc6607 *chip = container_of(dwork, struct sc6607, sc6607_aicr_setting_work);
-
-	oplus_sc6607_chg_set_aicr(chip, chip->aicr);
 }
 
 static int oplus_sc6607_get_vbus(struct sc6607 *chip)
@@ -3949,7 +4023,7 @@ static int sc6607_set_icl(struct oplus_chg_ic_dev *ic_dev, bool vooc_mode, bool 
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
 
 	if (step)
-		rc = oplus_sc6607_set_input_current_limit(chip, icl_ma);
+		rc = oplus_sc6607_set_aicr(chip, icl_ma);
 	else
 		rc = sc6607_set_input_current_limit(chip, icl_ma);
 	return rc;
@@ -4434,6 +4508,7 @@ static int sc6607_set_aicl_point(struct oplus_chg_ic_dev *ic_dev, int vbatt)
 {
 	bool present = false;
 	int chg_vol = 0;
+	int chg_type = 0;
 	int charger_type;
 	int rc = 0;
 	struct sc6607 *chip;
@@ -4445,7 +4520,9 @@ static int sc6607_set_aicl_point(struct oplus_chg_ic_dev *ic_dev, int vbatt)
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
 
 	chg_vol = sc6607_adc_read_vbus_volt(chip);
-	if (chg_vol > SC6607_9V_THRES1_MV) {
+	chg_type = oplus_wired_get_chg_type();
+	if (chg_vol > SC6607_9V_THRES1_MV &&
+	    (chg_type == OPLUS_CHG_USB_TYPE_PD || chg_type == OPLUS_CHG_USB_TYPE_QC2)) {
 		if (oplus_gauge_get_batt_num() == 1)
 			chip->hw_aicl_point = SC6607_AICL_POINT_VOL_9V;
 		else
@@ -4489,15 +4566,16 @@ static int sc6607_hardware_init(struct oplus_chg_ic_dev *ic_dev)
 			sc6607_disable_charger(chip);
 			oplus_sc6607_charger_suspend(chip);
 		} else {
-			oplus_sc6607_charger_unsuspend(chip);
+			if (!oplus_chg_get_cp_enable(chip)) {
+				oplus_sc6607_charger_unsuspend(chip);
+			}
 			sc6607_enable_charger(chip);
 		}
 
 		if (atomic_read(&chip->charger_suspended))
 			chg_info("ignore set current=500mA\n");
 		else {
-			sc6607_set_input_current_limit(chip, SC6607_DEFAULT_MIN_IBUS_100MA);
-			chip->charger_current_pre = SC6607_DEFAULT_MIN_IBUS_100MA;
+			sc6607_set_input_current_limit(chip, SC6607_DEFAULT_IBUS_MA);
 		}
 	}
 
@@ -4555,6 +4633,31 @@ static int sc6607_chg_set_flash_mode(struct oplus_chg_ic_dev *ic_dev, bool flash
 		ret = oplus_sc6607_request_otg_off(chip, BOOST_ON_CAMERA);
 
 	return ret;
+}
+
+static int sc6607_chg_set_pd_config(struct oplus_chg_ic_dev *ic_dev, u32 pdo)
+{
+	struct sc6607 *chip;
+	int vol_mv;
+
+	if (ic_dev == NULL) {
+		chg_err("ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_drvdata(ic_dev);
+
+	switch (PD_SRC_PDO_TYPE(pdo)) {
+	case PD_SRC_PDO_TYPE_FIXED:
+		vol_mv = PD_SRC_PDO_FIXED_VOLTAGE(pdo) * 50;
+		chip->pd_chg_volt = vol_mv;
+		chg_info("pd_chg_volt=%d\n", chip->pd_chg_volt);
+		break;
+	default:
+		chg_err("Unsupported pdo type(=%d)\n", PD_SRC_PDO_TYPE(pdo));
+		return -EINVAL;
+	}
+
+	return 0;
 }
 
 static void *sc6607_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus_chg_ic_func func_id)
@@ -4671,6 +4774,9 @@ static void *sc6607_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus_chg_ic_
 		break;
 	case OPLUS_IC_FUNC_BUCK_SET_FLASH_MODE:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_SET_FLASH_MODE, sc6607_chg_set_flash_mode);
+		break;
+	case OPLUS_IC_FUNC_BUCK_SET_PD_CONFIG:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_SET_PD_CONFIG, sc6607_chg_set_pd_config);
 		break;
 	default:
 		chg_err("this func(=%d) is not supported\n", func_id);
@@ -4899,6 +5005,7 @@ static void sc6607_get_voocphy_info_work(struct work_struct *work)
 
 static int pd_tcp_notifier_call(struct notifier_block *nb, unsigned long event, void *data)
 {
+	int i;
 	struct tcp_notify *noti = data;
 	struct sc6607 *chip = container_of(nb, struct sc6607, pd_nb);
 
@@ -4908,6 +5015,50 @@ static int pd_tcp_notifier_call(struct notifier_block *nb, unsigned long event, 
 		if (noti->swap_state.new_role == PD_ROLE_SINK)
 			chip->pr_swap = true;
 		break;
+
+	case TCP_NOTIFY_SINK_VBUS:
+		chg_info("pd type:%d. sink vbus %dmV %dmA type(0x%02X)\n",
+		         chip->pd_type, noti->vbus_state.mv, noti->vbus_state.ma, noti->vbus_state.type);
+		if (oplus_chg_get_common_charge_icl_support_flags() &&
+		    chip->pd_type == PD_CONNECT_PE_READY_SNK_APDO &&
+		    noti->vbus_state.type == TCP_VBUS_CTRL_PD_STANDBY &&
+		    noti->vbus_state.ma < SINK_SUSPEND_CURRENT) {
+			cancel_delayed_work_sync(&chip->charger_suspend_recovery_work);
+			oplus_chg_suspend_charger(true, TCPC_IBUS_DRAW_VOTER);
+			schedule_delayed_work(&chip->charger_suspend_recovery_work,
+			                      msecs_to_jiffies(SUSPEND_RECOVERY_DELAY_MS));
+		}
+		break;
+
+	case TCP_NOTIFY_PD_SOURCECAP_DONE:
+		chg_info("PD_SOURCECAP_DONE\n");
+		chip->cap_nr = (int)noti->caps_msg.caps->nr;
+		for (i = 0; i < chip->cap_nr; i++) {
+			chip->pdo[i].pdo_data = (u32)noti->caps_msg.caps->pdos[i];
+			chg_info("SourceCap[%d]: %08X\n", i + 1, chip->pdo[i].pdo_data);
+		}
+		if (oplus_chg_get_common_charge_icl_support_flags())
+			schedule_delayed_work(&chip->sourcecap_done_work, 0);
+		break;
+
+	case TCP_NOTIFY_PD_STATE:
+		switch (noti->pd_state.connected) {
+		case PD_CONNECT_NONE:
+			chip->pd_type = PD_CONNECT_NONE;
+			oplus_chg_suspend_charger(false, PD_PDO_ICL_VOTER);
+			for (i = 0; i < chip->cap_nr; i++)
+				chip->pdo[i].pdo_data = 0;
+			chip->pd_chg_volt = VBUS_5V;
+			chg_info("PD Notify Detach\n");
+			break;
+
+		case PD_CONNECT_PE_READY_SNK_APDO:
+			chip->pd_type = PD_CONNECT_PE_READY_SNK_APDO;
+			chg_info("PD Notify APDO Ready\n");
+			break;
+		}
+		break;
+
 	default:
 		break;
 	}
@@ -4999,16 +5150,12 @@ static int sc6607_buck_probe(struct i2c_client *client, const struct i2c_device_
 	chip->hvdcp_detach_time = 0;
 	chip->hvdcp_cfg_9v_done = false;
 	chip->hvdcp_exit_stat = HVDCP_EXIT_NORMAL;
-	chip->charger_current_pre = -1;
-	chip->aicr = SC6607_DEFAULT_MIN_IBUS_100MA;
-	chip->pd_curr_max = SC6607_PD_AICR_MAX_3000MA;
 	timer_setup(&chip->bc12_timeout, sc6607_bc12_timeout_func, 0);
 	sc6607_disable_hvdcp(chip);
 	INIT_DELAYED_WORK(&(chip->bc12.detect_work), sc6607_soft_bc12_work_func);
 	INIT_DELAYED_WORK(&chip->hw_bc12_detect_work, sc6607_hw_bc12_work_func);
 	INIT_DELAYED_WORK(&chip->init_status_work, sc6607_init_status_work);
 	INIT_DELAYED_WORK(&chip->init_status_check_work, sc6607_init_status_check_work);
-	INIT_DELAYED_WORK(&chip->sc6607_aicr_setting_work, sc6607_aicr_setting_work_callback);
 	INIT_DELAYED_WORK(&chip->qc_vol_convert_work, sc6607_qc_vol_convert);
 	INIT_DELAYED_WORK(&chip->get_voocphy_info_work, sc6607_get_voocphy_info_work);
 
@@ -5081,6 +5228,9 @@ static int sc6607_buck_probe(struct i2c_client *client, const struct i2c_device_
 		schedule_delayed_work(&chip->get_voocphy_info_work, msecs_to_jiffies(1000));
 
 	sc6607_track_check_buck_err(chip);
+	chip->pd_chg_volt = VBUS_5V;
+	INIT_DELAYED_WORK(&chip->sourcecap_done_work, oplus_sourcecap_done_work);
+	INIT_DELAYED_WORK(&chip->charger_suspend_recovery_work, oplus_charger_suspend_recovery_work);
 	chg_info("end!\n");
 	return 0;
 

@@ -91,6 +91,7 @@
 #define BC_UFCS_HANDSHAKE_OK		0X71
 #define BC_UFCS_DISABLE_MOS		0X72
 #define BC_UFCS_PDO_READY		0X74
+#define PD_SOURCECAP_DONE		0X79
 #endif
 
 #ifdef OPLUS_FEATURE_CHG_BASIC
@@ -491,6 +492,8 @@ enum usb_property_id {
 	USB_GET_SRC_INFO_L,
 	USB_GET_SRC_INFO_H,
 	USB_SET_GET_SRC,
+	USB_SET_AICL_VOL,
+	USB_GET_AICL_VOL,
 #endif /*OPLUS_FEATURE_CHG_BASIC*/
 	USB_PROP_MAX,
 };
@@ -573,6 +576,8 @@ enum usb_property_id {
 	USB_GET_SRC_INFO_L,
 	USB_GET_SRC_INFO_H,
 	USB_SET_GET_SRC,
+	USB_SET_AICL_VOL,
+	USB_GET_AICL_VOL,
 #endif /*OPLUS_FEATURE_CHG_BASIC*/
 	USB_PROP_MAX,
 };
@@ -844,6 +849,7 @@ struct battery_chg_dev {
 	struct delayed_work	oem_lcm_en_check_work;
 	struct delayed_work	ctrl_lcm_frequency;
 	struct delayed_work	sourcecap_done_work;
+	struct delayed_work	sourcecap_suspend_recovery_work;
 	u32			oem_misc_ctl_data;
 	bool			oem_usb_online;
 	bool			oem_lcm_check;
@@ -867,12 +873,12 @@ struct battery_chg_dev {
 	struct delayed_work 	pd_only_check_work;
 	pd_msg_data			pdo[PPS_PDO_MAX];
 	bool					voocphy_err_check;
+	bool			usb_aicl_enhance;
 #endif
 #ifdef OPLUS_FEATURE_CHG_BASIC
 	int vchg_trig_irq;
 	struct delayed_work vchg_trig_work;
 	struct delayed_work vbus_collapse_rerun_icl_work;
-	struct delayed_work ibus_collapse_rerun_aicl_work;
 	struct delayed_work wait_wired_charge_on;
 	struct delayed_work wait_wired_charge_off;
 	struct delayed_work mcu_en_init_work;

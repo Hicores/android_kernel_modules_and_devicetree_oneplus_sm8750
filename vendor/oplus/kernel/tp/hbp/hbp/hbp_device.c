@@ -662,7 +662,8 @@ static irqreturn_t hbp_irq_threaded_fn(int irq, void *dev_id)
 		if (reason == IRQ_REASON_RESET_WDT
 				|| reason == IRQ_REASON_RESET_PWR
 				|| reason == IRQ_REASON_RESET_FWUPDATE
-				|| reason == IRQ_REASON_RESPONSE) {
+				|| reason == IRQ_REASON_RESPONSE
+				|| reason == IRQ_REASON_RESET_IDENTIFY) {
 			goto report_frame;
 		}
 	}

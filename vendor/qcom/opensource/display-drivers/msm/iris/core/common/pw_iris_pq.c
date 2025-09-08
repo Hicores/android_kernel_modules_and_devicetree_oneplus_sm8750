@@ -861,6 +861,15 @@ int iris_update_backlight(u32 bl_lvl)
 	u32 bl_max_level;
 
 	pcfg = iris_get_cfg();
+
+	if (bl_lvl != pcfg->panel_backlight_in_pt)
+		pcfg->panel_backlight_in_pt = bl_lvl;
+	else {
+		IRIS_LOGD("%s(%d): PT backlight(%d)the same with last level,skip setting\n",
+			__func__, __LINE__, bl_lvl);
+		return rc;
+	}
+
 	bl_max_level = pcfg->bl_max_level ? pcfg->bl_max_level : IRIS_BL_MAX_LEVEL;
 
 	iris_setting.quality_cur.system_brightness = bl_lvl;
@@ -974,7 +983,6 @@ void iris_brightness_para_reset(void)
 	payload[0] = 0x40004000;
 	payload[1] = 0x4000;
 	iris_init_update_ipopt_t(IRIS_IP_DPP, 0x61, 0x61, 0x01);
-	iris_end_dpp(true);
 }
 
 void iris_csc2_para_set(uint32_t *values)
@@ -1008,7 +1016,6 @@ void iris_csc2_para_reset(void)
 	for (i = 0; i < 3; i++)
 		payload[i] = dwCSCCoffBuffer[i + 5];
 	iris_init_update_ipopt_t(IRIS_IP_DPP, 0xd0, 0xd0, 0x01);
-	iris_end_dpp(true);
 
 	for (i = 0; i < 12; i++)
 		dwCSC2CoffBuffer[i] = dwCSC2CoffDefault[i];
@@ -1039,7 +1046,6 @@ void iris_csc_para_reset(void)
 	for (i = 0; i < 8; i++)
 		payload[i] = dwCSCCoffBuffer[i];
 	iris_init_update_ipopt_t(IRIS_IP_DPP, 0x40, 0x40, 0x01);
-	iris_end_dpp(true);
 }
 
 void iris_brightness_level_set(u32 *value)

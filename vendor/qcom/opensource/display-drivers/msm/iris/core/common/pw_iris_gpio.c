@@ -59,6 +59,15 @@ int iris_enable_pinctrl(void *dev, void *cfg)
 	return 0;
 }
 
+void iris_reset_sys_domain(void)
+{
+	iris_send_one_wired_cmd(IRIS_POWER_DOWN_SYS);
+	usleep_range(3500, 3501);
+	iris_send_one_wired_cmd(IRIS_POWER_UP_SYS);
+	usleep_range(3500, 3501);
+}
+EXPORT_SYMBOL(iris_reset_sys_domain);
+
 int iris_set_pinctrl_state(bool enable)
 {
 	int rc = 0;
@@ -204,9 +213,9 @@ int iris_parse_gpio(void *dev, void *cfg)
 			"iris-wakeup-gpio", 0);
 	IRIS_LOGI("%s(), wakeup gpio %d", __func__,
 			pcfg->iris_wakeup_gpio);
-	if (!gpio_is_valid(pcfg->iris_wakeup_gpio));
+	if (!gpio_is_valid(pcfg->iris_wakeup_gpio))
+		IRIS_LOGW("%s(), wake up gpio is not specified", __func__);
 
-		IRIS_LOGW("%s(), wake up gpio is not specified", __func__)
 	pcfg->iris_abyp_ready_gpio = of_get_named_gpio(of_node,
 			"iris-abyp-ready-gpio", 0);
 	IRIS_LOGI("%s(), abyp ready status gpio %d", __func__,
@@ -389,7 +398,7 @@ void iris_reset_chip(void)
 void iris_reset(void *dev)
 {
 	//struct device *_dev = dev;
-#if 0
+#if 1
 	if (!iris_is_chip_supported())
 		return;
 #endif
@@ -422,7 +431,6 @@ void _iris_reset_chip_off(struct device *dev)
 	devm_gpiod_put(dev, iris_reset_gpio);
 	IRIS_LOGI("%s(), reset end", __func__);
 }
-
 
 void iris_reset_off(void *dev)
 {

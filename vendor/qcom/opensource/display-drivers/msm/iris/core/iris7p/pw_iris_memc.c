@@ -68,6 +68,13 @@ void iris_pwil0_efifo_enable_i7p(bool enable)
 	u32 reg_val;
 	u32 *payload = NULL;
 
+	IRIS_LOGI("%s(), enable = %d.", __func__, enable);
+
+	if (!enable && iris_is_ptsr_enable()) {
+		IRIS_LOGI("%s(), try to disable but ptsr enabled, return", __func__);
+		return;
+	}
+
 	payload = iris_get_ipopt_payload_data(IRIS_IP_PWIL, 0x01, 4);
 	reg_val = payload[0];
 	if (enable)
@@ -136,9 +143,11 @@ void iris_set_pwil_mode_i7p(u8 mode, int state, bool commit)
 
 void iris_dtg_eco_i7p(bool enable, bool chain)
 {
+	struct iris_cfg *pcfg = iris_get_cfg();
 	u32 *payload = NULL;
 
 	IRIS_LOGI("%s: %d", __func__, enable);
+	return;
 
 	payload = iris_get_ipopt_payload_data(IRIS_IP_PWIL, 0x10, 2);
 	if (payload) {
@@ -146,7 +155,8 @@ void iris_dtg_eco_i7p(bool enable, bool chain)
 			payload[0] &= ~0x100;
 			payload[0] |= 0x800;
 		} else {
-			payload[0] |= 0x100;
+			if (pcfg->rx_mode == IRIS_CMD_MODE)
+				payload[0] |= 0x100;
 			payload[0] &= ~0x800;
 		}
 	}
@@ -951,7 +961,8 @@ static void iris_dtg_setting_update(void *handle, bool lock, bool i2c_path)
 	u32 sw_n2m = 0;
 	u32 cmd[50];
 	u32 vfp_max_rfb;
-	int idx = 0;
+	u16 idx = 0;
+	u16 i2c_msg_num = 0, ret = 0, i = 0;
 
 	if (pcfg->tx_mode != IRIS_VIDEO_MODE)
 		return;
@@ -971,99 +982,220 @@ static void iris_dtg_setting_update(void *handle, bool lock, bool i2c_path)
 	sw_fix_te_period = payload[25];
 	ovs_dly_frc = payload[29];
 	dtg_vtotal = dtg_vsw + dtg_vbp + dtg_vres + dtg_vfp;
-	output_vtotal_change = dtg_vtotal * pcfg->default_panel_te / pcfg->panel_te - dtg_vtotal;
-	input_vtotal_change = dtg_vtotal * pcfg->default_panel_te / pcfg->ap_te - dtg_vtotal;
-	IRIS_LOGI("%s pwil_mode:%d default_panel_te: %d, panel_te: %d ap_te: %d", __func__,
-			pcfg->pwil_mode, pcfg->default_panel_te, pcfg->panel_te, pcfg->ap_te);
-	IRIS_LOGI("dtg_vtotal: %d, output_vtotal_change: %d, input_vtotal_change: %d",
-			dtg_vtotal, output_vtotal_change, input_vtotal_change);
-	dtg_vfp += output_vtotal_change;
-	//add 1.5vtotal for RFB to PT
-	dtg_vfp_max += input_vtotal_change + dtg_vtotal;
-	vfp_max_rfb = 2 * dtg_vfp_max;
-	ivsa_filter += input_vtotal_change;
-	te_filter += output_vtotal_change;
-	fi_preload_dly += output_vtotal_change;
-	sw_fix_te_period = sw_fix_te_period * pcfg->default_panel_te / pcfg->panel_te;
-	//ovs_dly_frc += output_vtotal_change;
-	ovs_dly_frc = (output_vtotal_change + dtg_vtotal) / 10;
-
-	//x6871 need to be the least value be 20
-	dtg_vfp_min = 20;
-	//if (pcfg->pwil_mode != PT_MODE)
-	//	dtg_vfp_min = dtg_vfp > 1000 ? dtg_vfp - 60 : dtg_vfp;
-
-	if (pcfg->pwil_mode != PT_MODE && pcfg->panel_te != pcfg->ap_te) {
-		u32 temp, temp0, m, n;
-
-		temp = pcfg->panel_te;
-		temp0 = pcfg->ap_te;
-		while (temp % temp0 != 0) {
-			m = temp % temp0;
-			temp = temp0;
-			temp0 = m;
-		}
-		m = pcfg->panel_te/temp0;
-		n = pcfg->ap_te/temp0;
-		IRIS_LOGI("%s n=%d m=%d\n", __func__, n, m);
-		if (iris_debug_n2m_in_frc_only == 1)
-			sw_n2m = n | (m << 16) | (1 << 31);
-		else
-			sw_n2m = n | (m << 16) | (1 << 30);
-	}
 
 	//special for mtk
 	if (handle)
 		cmd[idx++] = 0xFFFFFFF4;
-	cmd[idx++] = IRIS_DTG_ADDR + DTG_FRC_SW_CTRL2;
-	if (iris_debug_dtg == 3) {
-		if (iris_n2m_enlarge(pcfg->sw_n2m, sw_n2m))
-			cmd[idx++] = sw_n2m;
-		else {
-			// keep previous n2m value
-			cmd[idx++] = pcfg->sw_n2m;
-			sw_n2m = pcfg->sw_n2m;
-		}
-	} else
-		cmd[idx++] = sw_n2m;
-	cmd[idx++] = IRIS_DTG_ADDR + DTG_UPDATE;
-	if (iris_debug_dtg == 0 || iris_debug_dtg == 3)
-		cmd[idx++] = 0x3;
-	else if (iris_debug_dtg == 1) {
-		if (iris_n2m_enlarge(pcfg->sw_n2m, sw_n2m))
-			cmd[idx++] = 0x3;
-		else
-			cmd[idx++] = 0x2;
-	} else if (iris_debug_dtg == 2) {
-		if (iris_n2m_enlarge(pcfg->sw_n2m, sw_n2m))
-			cmd[idx++] = 0x2;
-		else
-			cmd[idx++] = 0x3;
-	}
-	pcfg->sw_n2m = sw_n2m;
 
-	cmd[idx++] = IRIS_DTG_ADDR + DTG_VFP;
-	cmd[idx++] = dtg_vfp;
-	//cmd[idx++] = IRIS_DTG_ADDR + DTG_REG_9;
-	//cmd[idx++] = ivsa_filter;
-	//cmd[idx++] = IRIS_DTG_ADDR + DTG_REG_10;
-	//cmd[idx++] = te_filter;
-	//cmd[idx++] = IRIS_DTG_ADDR + DTG_FI_PRELOAD_DLY;
-	//cmd[idx++] = fi_preload_dly;
-	cmd[idx++] = IRIS_DTG_ADDR + DTG_VFP_MIN;
-	cmd[idx++] = dtg_vfp_min;	// VFP_MIN
-	cmd[idx++] = IRIS_DTG_ADDR + DTG_VFP_MAX;
-	cmd[idx++] = dtg_vfp_max + 20;	// VFP_MAX
-	cmd[idx++] = IRIS_DTG_ADDR + DTG_VFP_MAX_RFB;
-	cmd[idx++] = vfp_max_rfb + 20;	// VFP_MAX_RFB
-	//cmd[idx++] = IRIS_DTG_ADDR + DTG_REG_23;
-	//cmd[idx++] = sw_fix_te_period;
-	//cmd[idx++] = IRIS_DTG_ADDR + DTG_OVS_DLY_FRC;
-	//cmd[idx++] = ovs_dly_frc;
-	//cmd[idx++] = IRIS_DTG_ADDR + DTG_REG_29;
-	//cmd[idx++] = sw_n2m;
-	cmd[idx++] = IRIS_DTG_ADDR + DTG_UPDATE;
-	cmd[idx++] = 0x2;
+	switch (pcfg->ap_te) {
+		case IRIS_FPS_144:
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_HSW;
+			cmd[idx++] = 0xF;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_HBP;
+			cmd[idx++] = 0xF;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_HFP;
+			cmd[idx++] = 0x32;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_VFP;
+			cmd[idx++] = 0x74;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_IVSA_FILTER_CTRL;
+			cmd[idx++] = 0x00000B4C;//0x80000B4C;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_TE_FILTER_CTRL;
+			cmd[idx++] = 0x00000B4C;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_FI_PRELOAD_DLY;
+			cmd[idx++] = 0x00000B22;//0x00000B32;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_EVS_PRE_DLY;
+			cmd[idx++] = 0x00000B32;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_VFP_MIN;
+			cmd[idx++] = 0; // VFP_MIN
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_VFP_MAX;
+			cmd[idx++] = 0x1792;	// VFP_MAX
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_VFP_MAX_RFB;
+			cmd[idx++] = 0x1792;	// VFP_MAX_RFB
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_TE_WIDTH;
+			cmd[idx++] = 0x190;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_SW_FIX_TE_PERIOD;
+			cmd[idx++] = 0x11F800;
+			//cmd[idx++] = IRIS_DTG_ADDR + DTG_OVS_DLY_FRC;
+			//cmd[idx++] = ovs_dly_frc;
+			//cmd[idx++] = IRIS_DTG_ADDR + DTG_REG_29;
+			//cmd[idx++] = sw_n2m;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_UPDATE;
+			cmd[idx++] = 0x2;
+			for (int i = 0; i < idx; i++)
+				IRIS_LOGD("FPS%d - cmd[%d]: 0x%x", pcfg->ap_te, i, cmd[i]);
+			break;
+
+
+		case IRIS_FPS_120:
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_HSW;
+			cmd[idx++] = payload[0];//0xF;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_HBP;
+			cmd[idx++] = payload[1];//0xF;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_HFP;
+			cmd[idx++] = payload[3];//0x81;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_VFP;
+			cmd[idx++] = payload[7];//0x7C;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_IVSA_FILTER_CTRL;
+			cmd[idx++] = 0x00000B48;//0x80000B48;//payload[9];
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_TE_FILTER_CTRL;
+			cmd[idx++] = 0x00000B48;//payload[10];
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_FI_PRELOAD_DLY;
+			cmd[idx++] = 0x00000B3A;//payload[13];
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_EVS_PRE_DLY;
+			cmd[idx++] = 0x00000B3A;//payload[16];
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_VFP_MIN;
+			cmd[idx++] = payload[20];//0; // VFP_MIN
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_VFP_MAX;
+			cmd[idx++] = payload[21];//0x17BE;	// VFP_MAX
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_VFP_MAX_RFB;
+			cmd[idx++] = payload[22];//0x17BE;	// VFP_MAX_RFB
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_TE_WIDTH;
+			cmd[idx++] = payload[23];//0x1DF;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_SW_FIX_TE_PERIOD;
+			cmd[idx++] = payload[25];//0x159378;
+			//cmd[idx++] = IRIS_DTG_ADDR + DTG_OVS_DLY_FRC;
+			//cmd[idx++] = ovs_dly_frc;
+			//cmd[idx++] = IRIS_DTG_ADDR + DTG_REG_29;
+			//cmd[idx++] = sw_n2m;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_UPDATE;
+			cmd[idx++] = 0x2;
+
+			for (int i = 0; i < idx; i++)
+				IRIS_LOGD("FPS%d - cmd[%d]: 0x%x", pcfg->ap_te, i, cmd[i]);
+			break;
+
+		case IRIS_FPS_90:
+		case IRIS_FPS_60:
+			output_vtotal_change = dtg_vtotal * pcfg->default_panel_te / pcfg->panel_te - dtg_vtotal;
+			input_vtotal_change = dtg_vtotal * pcfg->default_panel_te / pcfg->ap_te - dtg_vtotal;
+			IRIS_LOGI("%s pwil_mode:%d default_panel_te: %d, panel_te: %d ap_te: %d", __func__,
+					pcfg->pwil_mode, pcfg->default_panel_te, pcfg->panel_te, pcfg->ap_te);
+			IRIS_LOGI("dtg_vtotal: %d, output_vtotal_change: %d, input_vtotal_change: %d",
+					dtg_vtotal, output_vtotal_change, input_vtotal_change);
+
+			dtg_vfp += output_vtotal_change;
+			//add 1.5vtotal for RFB to PT
+			dtg_vfp_max += input_vtotal_change + dtg_vtotal;
+			vfp_max_rfb = 2 * dtg_vfp_max;
+			ivsa_filter += input_vtotal_change;
+			te_filter += output_vtotal_change;
+			fi_preload_dly += output_vtotal_change;
+			sw_fix_te_period = sw_fix_te_period * pcfg->default_panel_te / pcfg->panel_te;
+			//ovs_dly_frc += output_vtotal_change;
+			ovs_dly_frc = (output_vtotal_change + dtg_vtotal) / 10;
+
+			//x6871 need to be the least value be 20
+			dtg_vfp_min = 20;
+			//if (pcfg->pwil_mode != PT_MODE)
+			//	dtg_vfp_min = dtg_vfp > 1000 ? dtg_vfp - 60 : dtg_vfp;
+
+			if (pcfg->pwil_mode != PT_MODE && pcfg->panel_te != pcfg->ap_te) {
+				u32 temp, temp0, m, n;
+
+				temp = pcfg->panel_te;
+				temp0 = pcfg->ap_te;
+				while (temp % temp0 != 0) {
+					m = temp % temp0;
+					temp = temp0;
+					temp0 = m;
+				}
+				m = pcfg->panel_te/temp0;
+				n = pcfg->ap_te/temp0;
+				IRIS_LOGI("%s n=%d m=%d\n", __func__, n, m);
+				if (iris_debug_n2m_in_frc_only == 1)
+					sw_n2m = n | (m << 16) | (1 << 31);
+				else
+					sw_n2m = n | (m << 16) | (1 << 30);
+			}
+
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_FRC_SW_CTRL2;
+			if (iris_debug_dtg == 3) {
+				if (iris_n2m_enlarge(pcfg->sw_n2m, sw_n2m))
+					cmd[idx++] = sw_n2m;
+				else {
+					// keep previous n2m value
+					cmd[idx++] = pcfg->sw_n2m;
+					sw_n2m = pcfg->sw_n2m;
+				}
+			} else
+				cmd[idx++] = sw_n2m;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_UPDATE;
+			if (iris_debug_dtg == 0 || iris_debug_dtg == 3)
+				cmd[idx++] = 0x3;
+			else if (iris_debug_dtg == 1) {
+				if (iris_n2m_enlarge(pcfg->sw_n2m, sw_n2m))
+					cmd[idx++] = 0x3;
+				else
+					cmd[idx++] = 0x2;
+			} else if (iris_debug_dtg == 2) {
+				if (iris_n2m_enlarge(pcfg->sw_n2m, sw_n2m))
+					cmd[idx++] = 0x2;
+				else
+					cmd[idx++] = 0x3;
+			}
+			pcfg->sw_n2m = sw_n2m;
+
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_HSW;
+			cmd[idx++] = payload[0];//0xF;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_HBP;
+			cmd[idx++] = payload[1];//0xF;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_HFP;
+			cmd[idx++] = payload[3];//0x81;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_VFP;
+			cmd[idx++] = dtg_vfp;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_IVSA_FILTER_CTRL;
+			cmd[idx++] = 0x00000B48;//0x80000B48;//payload[9];
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_TE_FILTER_CTRL;
+			cmd[idx++] = payload[10];
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_FI_PRELOAD_DLY;
+			cmd[idx++] = payload[13];
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_EVS_PRE_DLY;
+			cmd[idx++] = payload[16];
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_VFP_MIN;
+			cmd[idx++] = dtg_vfp_min;	// VFP_MIN
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_VFP_MAX;
+			cmd[idx++] = dtg_vfp_max + 20;	// VFP_MAX
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_VFP_MAX_RFB;
+			cmd[idx++] = vfp_max_rfb + 20;	// VFP_MAX_RFB
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_TE_WIDTH;
+			cmd[idx++] = payload[23];//0x1DF;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_SW_FIX_TE_PERIOD;
+			cmd[idx++] = payload[25];//0x159378;
+			//cmd[idx++] = IRIS_DTG_ADDR + DTG_REG_23;
+			//cmd[idx++] = sw_fix_te_period;
+			//cmd[idx++] = IRIS_DTG_ADDR + DTG_OVS_DLY_FRC;
+			//cmd[idx++] = ovs_dly_frc;
+			//cmd[idx++] = IRIS_DTG_ADDR + DTG_REG_29;
+			//cmd[idx++] = sw_n2m;
+			cmd[idx++] = IRIS_DTG_ADDR + DTG_UPDATE;
+			cmd[idx++] = 0x2;
+			for (int i = 0; i < idx; i++)
+				IRIS_LOGD("FPS%d - cmd[%d]: 0x%x", pcfg->ap_te, i, cmd[i]);
+
+			break;
+
+		default:
+			IRIS_LOGE("Unsupported FPS timing, ERROR! dtg_vtotal[%d]", dtg_vtotal);
+			break;
+	}
+
+	if (idx == 0)
+		return;
+
+	if (i2c_path) {
+		if (pcfg->iris_i2c_write) {
+			while (i2c_msg_num < idx/2) {
+				ret = pcfg->iris_i2c_write(cmd[i], cmd[i+1]);
+				IRIS_LOGD("i2c_write - addr[%d]:0x%x, value:0x%x", i, cmd[i], cmd[i+1]);
+				if (ret) {
+					IRIS_LOGE("%s(%d), error, i = %d, ret = %d.", __func__, __LINE__, i, ret);
+					break;
+				}
+				i += 2;
+				i2c_msg_num++;
+			}
+		}
+	} else {
 
 #if defined(DRM_MEDIATEK) || defined(IRIS_MTK_SPECIFIC)
 	iris_ocp_write_mult_vals(idx, cmd);
@@ -1076,6 +1208,8 @@ static void iris_dtg_setting_update(void *handle, bool lock, bool i2c_path)
 	if (lock && pcfg->lightup_ops.release_panel_lock)
 		pcfg->lightup_ops.release_panel_lock();
 #endif
+
+	}
 }
 
 void iris_update_panel_ap_te_i7p(void *handle, u32 new_te)
@@ -1083,6 +1217,9 @@ void iris_update_panel_ap_te_i7p(void *handle, u32 new_te)
 	struct iris_cfg *pcfg = iris_get_cfg();
 
 	if ((pcfg->rx_mode == IRIS_VIDEO_MODE) && (pcfg->tx_mode == IRIS_VIDEO_MODE)) {
+		if (pcfg->lightup_ops.acquire_panel_lock)
+			pcfg->lightup_ops.acquire_panel_lock();
+
 		IRIS_LOGD("%s enter +++ panel_te:%d  ap_te:%d new_te:%d",
 			__func__, pcfg->panel_te, pcfg->ap_te, new_te);
 		// bypass mode
@@ -1103,14 +1240,14 @@ void iris_update_panel_ap_te_i7p(void *handle, u32 new_te)
 				if (new_te != pcfg->panel_te) {
 					pcfg->panel_te = new_te;
 					pcfg->ap_te = new_te;
-					iris_dtg_setting_update(NULL, true, false);
+					iris_dtg_setting_update(NULL, false, false);
 					IRIS_LOGI("[%s:%d], PT new panel TE: %d", __func__, __LINE__, new_te);
 				}
 				pcfg->sw_n2m = 0;
 			} else { // RFB mode or MEMC mode
 				if (new_te != pcfg->ap_te) {
 					pcfg->ap_te = new_te;
-					iris_dtg_setting_update(NULL, true, false);
+					iris_dtg_setting_update(NULL, false, false);
 					IRIS_LOGI("[%s:%d], RFB/MEMC new AP TE: %d, panel TE: %d",
 						__func__, __LINE__, new_te, pcfg->panel_te);
 				}
@@ -1118,7 +1255,34 @@ void iris_update_panel_ap_te_i7p(void *handle, u32 new_te)
 		}
 		IRIS_LOGD("%s exit ---- panel_te:%d  ap_te:%d new_te:%d",
 			__func__, pcfg->panel_te, pcfg->ap_te, new_te);
+
+		if (pcfg->lightup_ops.release_panel_lock)
+			pcfg->lightup_ops.release_panel_lock();
 		return;
+	}
+
+	pcfg->panel_te = new_te;
+	pcfg->ap_te = new_te;
+	pcfg->sw_n2m = 0;
+}
+
+void iris_exit_abyp_update_panel_ap_te_i7p(void *handle, u32 new_te)
+{
+	struct iris_cfg *pcfg = iris_get_cfg();
+
+	if ((pcfg->rx_mode == IRIS_VIDEO_MODE) && (pcfg->tx_mode == IRIS_VIDEO_MODE)) {
+		IRIS_LOGD("%s enter +++ panel_te:%d  ap_te:%d new_te:%d",
+			__func__, pcfg->panel_te, pcfg->ap_te, new_te);
+		// bypass mode
+		if (pcfg->abyp_ctrl.abypass_mode == ANALOG_BYPASS_MODE) {
+			pcfg->panel_te = new_te;
+			pcfg->ap_te = new_te;
+			iris_dtg_setting_update(NULL, false, true);
+			IRIS_LOGI("[%s:%d], PT new panel TE: %d", __func__, __LINE__, new_te);
+		}
+
+		IRIS_LOGD("%s exit ---- panel_te:%d  ap_te:%d new_te:%d",
+			__func__, pcfg->panel_te, pcfg->ap_te, new_te);
 	}
 
 	pcfg->panel_te = new_te;
@@ -1390,11 +1554,11 @@ void iris_memc_frc_phase_update_i7p(void)
 	struct iris_cfg *pcfg = iris_get_cfg();
 
 	/* FRC LUT */
-	if (pcfg->memc_info.panel_fps == 144)
+	if (pcfg->memc_info.panel_fps == IRIS_FPS_144)
 		iris_send_ipopt_cmds(FRC_PHASE_LUT, 3);
-	else if (pcfg->memc_info.panel_fps == 120)
+	else if (pcfg->memc_info.panel_fps == IRIS_FPS_120)
 		iris_send_ipopt_cmds(FRC_PHASE_LUT, 2);
-	else if (pcfg->memc_info.panel_fps == 90)
+	else if (pcfg->memc_info.panel_fps == IRIS_FPS_90)
 		iris_send_ipopt_cmds(FRC_PHASE_LUT, 1);
 	else
 		iris_send_ipopt_cmds(FRC_PHASE_LUT, 0);
@@ -1411,7 +1575,7 @@ void iris_memc_info_update_i7p(void)
 		pcfg->memc_info.mv_vres = pcfg->frc_setting.init_single_mv_vres;
 
 		pcfg->memc_info.memc_level = 3;
-		pcfg->memc_info.video_fps = 30;
+		pcfg->memc_info.video_fps = IRIS_FPS_30;
 		pcfg->memc_info.panel_fps = pcfg->panel_te;
 	}
 
@@ -1684,7 +1848,7 @@ void iris_memc_ctrl_frc_prepare_i7p(void)
 
 	/* disable FLFP before memc */
 	iris_frc_lp_switch(true, false);
-	iris_pmu_bsram_set(true, false);
+	iris_pmu_bsram_set(true, false, IRIS_BSRAM_FRC);
 
 	iris_memc_chain_prepare();
 
@@ -1784,7 +1948,7 @@ void iris_memc_ctrl_pt_post_i7p(void)
 	iris_pmu_frc_set(false, false);
 	if (pcfg->pwil_mode == PT_MODE) {
 		iris_pmu_dscu_set(false);
-		iris_pmu_bsram_set(false, false);
+		iris_pmu_bsram_set(false, false, IRIS_BSRAM_FRC);
 	}
 
 	/* enable flfp after exit frc */
@@ -1866,7 +2030,7 @@ void iris_memc_ctrl_rfb_prepare_i7p(void)
 
 	/* power domain on */
 	iris_pmu_frc_set(true, false);
-	iris_pmu_bsram_set(true, false);
+	iris_pmu_bsram_set(true, false, IRIS_BSRAM_FRC);
 	iris_pmu_dscu_set(true);
 
 	iris_rfb_helper_change();
@@ -1882,7 +2046,8 @@ void iris_memc_ctrl_frc_post_i7p(void)
 	struct iris_cfg *pcfg = iris_get_cfg();
 	/* in vin-vout mode, enter memc to need to enable efifo and dtg eco */
 	if ((pcfg->rx_mode == IRIS_VIDEO_MODE) && (pcfg->tx_mode == IRIS_VIDEO_MODE)) {
-		iris_pwil0_efifo_enable_i7p(false);
+		if (pcfg->memc_info.panel_fps != IRIS_FPS_144)
+			iris_pwil0_efifo_enable_i7p(false);
 		iris_dtg_eco_i7p(false, true);
 		pcfg->dtg_eco_enabled = false;
 		if (iris_debug_n2m_in_frc_only == 2)
@@ -2486,6 +2651,7 @@ void iris_memc_func_init_i7p(struct iris_memc_func *memc_func)
 {
 	memc_func->register_osd_irq = NULL;
 	memc_func->update_panel_ap_te = iris_update_panel_ap_te_i7p;
+	memc_func->exit_abyp_update_panel_ap_te = iris_exit_abyp_update_panel_ap_te_i7p;
 	memc_func->inc_osd_irq_cnt = NULL;
 	memc_func->is_display1_autorefresh_enabled = NULL;
 	memc_func->pt_sr_set = NULL;

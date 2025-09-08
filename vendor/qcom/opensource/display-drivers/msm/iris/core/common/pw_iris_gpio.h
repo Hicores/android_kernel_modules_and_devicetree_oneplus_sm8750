@@ -35,5 +35,6 @@ void iris_disable_vdd(void);
 void iris_reset_chip(void);
 void iris_reset_off(void *dev);
 int iris_dbg_gpio_init(void);
+void iris_reset_sys_domain(void);
 
 #endif //__DSI_IRIS_GPIO__

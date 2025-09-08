@@ -146,11 +146,18 @@ static int syna_get_irq_reason(void *priv, enum irq_reason *reason)
 		return -1;
 	}
 
-	if (tcm_hcd->status_report_code < REPORT_IDENTIFY
+	if (tcm_hcd->status_report_code == REPORT_IDENTIFY) {
+		hbp_info("Received REPORT_IDENTIFY, device has been reset.\n");
+		*reason = IRQ_REASON_RESET_IDENTIFY;
+	} else if (tcm_hcd->status_report_code == REPORT_TOUCH) {
+		hbp_info("Received LBP touch report, please check mode correct or not.\n");
+		*reason = IRQ_REASON_LBP_POINTS_REPORT;
+	} else if (tcm_hcd->status_report_code < REPORT_IDENTIFY
 			|| tcm_hcd->status_report_code == REPORT_DELTA
 			|| tcm_hcd->status_report_code == REPORT_RAW
-			|| tcm_hcd->status_report_code == REPORT_DEBUG)
+			|| tcm_hcd->status_report_code == REPORT_DEBUG) {
 		*reason = IRQ_REASON_RESPONSE;
+	}
 
 	return 0;
 }
@@ -391,8 +398,8 @@ static int syna_get_touch_points(void *priv, struct point_info *points)
 		case FINGER:
 		case GLOVED_OBJECT:
 			points[idx].status = 1;
-			points[idx].x = object_data[idx].x_pos;
-			points[idx].y = object_data[idx].y_pos;
+			points[idx].x = object_data[idx].x_pos * INPUT_RESOLUTION_NUM / 10;
+			points[idx].y = object_data[idx].y_pos * INPUT_RESOLUTION_NUM / 10;
 			points[idx].touch_major = object_data[idx].x_width;
 			points[idx].width_major = object_data[idx].y_width;
 			obj_attention = obj_attention | (1 << idx);

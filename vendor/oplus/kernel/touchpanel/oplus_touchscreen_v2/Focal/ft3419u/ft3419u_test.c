@@ -1450,6 +1450,13 @@ int ft3419u_auto_preoperation(struct seq_file *s, void *chip_data,
 		goto alloc_err;
 	}
 
+	ts_data->noise_rawdata = (int *)kzalloc(node_num * sizeof(int), GFP_KERNEL);
+
+	if (!ts_data->noise_rawdata) {
+		FTS_TEST_SAVE_ERR("kzalloc for noise_rawdata fail\n");
+		goto alloc_err;
+	}
+
 	ts_data->rawdata = (int *)kzalloc(node_num * sizeof(int), GFP_KERNEL);
 
 	if (!ts_data->rawdata) {
@@ -1529,9 +1536,188 @@ alloc_err:
 		ts_data->panel_differ = NULL;
 	}
 
+	if (ts_data->noise_rawdata) {
+		kfree(ts_data->noise_rawdata);
+		ts_data->noise_rawdata = NULL;
+	}
+
 	return TEST_RESULT_ABNORMAL;
 }
 
+int ft3419u_noise_autotest(struct seq_file *s, void *chip_data,
+			  struct auto_testdata *focal_testdata, struct test_item_info *p_test_item_info)
+{
+	int ret = 0;
+	int i = 0;
+	u8 fir = 0;
+	u8 reg06_val = 0;
+	u8 reg0d_val = 0;
+	u8 rawdata_addr = 0;
+	bool result = false;
+	struct chip_data_ft3419u *ts_data = (struct chip_data_ft3419u *)chip_data;
+	int byte_num = 0;
+	int tx_num = ts_data->hw_res->tx_num;
+	int rx_num = ts_data->hw_res->rx_num;
+	int node_num = tx_num * rx_num;
+
+	TPD_INFO("\n============ Test Item: Noise Test\n");
+	FTS_TEST_FUNC_ENTER();
+	FTS_TEST_SAVE_INFO("\n============ Test Item: Noise Test\n");
+
+
+	if (!ts_data->fts_autotest_offset->fts_noise_data_P
+			|| !ts_data->fts_autotest_offset->fts_noise_data_N) {
+		TPD_INFO("fts_noise_data_P || fts_noise_data_N is NULL");
+		return 0;
+
+	} else {
+		TPD_INFO("fts_noise_data_P || fts_noise_data_N is effective \n");
+	}
+
+	if (!ts_data->node_valid || !ts_data->noise_rawdata) {
+		FTS_TEST_SAVE_ERR("noise data is null\n");
+		ret = -EINVAL;
+		goto test_err;
+	}
+
+	ret = enter_factory_mode(ts_data);
+
+	if (ret < 0) {
+		FTS_TEST_SAVE_ERR("failed to enter factory mode,ret=%d\n", ret);
+		goto test_err;
+	}
+
+	ret = fts_test_read_reg(FACTORY_REG_TOUCH_THR, &reg0d_val);
+
+	if (ret < 0) {
+		FTS_TEST_SAVE_ERR("read reg0d fail,ret=%d\n", ret);
+		goto test_err;
+	}
+
+	TPD_INFO("reg0d_val = [%d]\n", reg0d_val);
+
+	/* save origin value */
+	ret = fts_test_read_reg(FACTORY_REG_DATA_SELECT, &reg06_val);
+
+	if (ret < 0) {
+		FTS_TEST_SAVE_ERR("read reg06 fail,ret=%d\n", ret);
+		goto test_err;
+	}
+
+	TPD_INFO("reg06_val = [%d]\n", reg06_val);
+
+	ret = fts_test_read_reg(FACTORY_REG_FIR, &fir);
+
+	if (ret < 0) {
+		FTS_TEST_SAVE_ERR("read fir error,ret=%d\n", ret);
+		goto test_err;
+	}
+
+	TPD_INFO("fir = [%d]\n", fir);
+
+	ret = fts_test_write_reg(FACTORY_REG_DATA_SELECT, 0x01);
+
+	if (ret < 0) {
+		FTS_TEST_SAVE_ERR("set reg06 fail,ret=%d\n", ret);
+		goto restore_reg;
+	}
+
+	ret = fts_test_write_reg(FACTORY_REG_FIR, 0x01);
+
+	if (ret < 0) {
+		FTS_TEST_SAVE_ERR("set fir fail,ret=%d\n", ret);
+		goto restore_reg;
+	}
+
+	ret = fts_test_write_reg(FACTORY_REG_FRAME_NUM, 20);
+
+	if (ret < 0) {
+		FTS_TEST_SAVE_ERR("set frame fail,ret=%d\n", ret);
+		goto restore_reg;
+	}
+
+	ret = fts_test_write_reg(FACTORY_REG_MAX_DIFF, 0x01);
+
+	if (ret < 0) {
+		FTS_TEST_SAVE_ERR("write 0x1B fail,ret=%d\n", ret);
+		goto restore_reg;
+	}
+
+	for (i = 0; i < 3; i++) {
+		/* lost 3 frames, in order to obtain stable data */
+		/* start scanning */
+		ret = start_scan();
+
+		if (ret < 0) {
+			FTS_TEST_SAVE_ERR("scan fail\n");
+			continue;
+		}
+
+		/* read rawdata */
+		rawdata_addr = FACTORY_REG_RAWDATA_ADDR_MC_SC;
+		byte_num = node_num * 2;
+		ret = read_rawdata(FACTORY_REG_LINE_ADDR, 0xAA, rawdata_addr, byte_num,
+				   ts_data->noise_rawdata);
+
+		if (ret < 0) {
+			FTS_TEST_SAVE_ERR("read rawdata fail\n");
+		}
+	}
+
+	if (ret < 0) {
+		result = false;
+		goto restore_reg;
+	}
+
+	ft3419u_output_data(ts_data->noise_rawdata, ts_data, focal_testdata, NODE_MATCH);
+
+	result = true;
+
+	if (ts_data->fts_autotest_offset->fts_noise_data_P
+			&& ts_data->fts_autotest_offset->fts_noise_data_N) {
+		for (i = 0; i < node_num; i++) {
+			if (ts_data->noise_rawdata[i] >
+					ts_data->fts_autotest_offset->fts_noise_data_P[i]) {
+				TPD_INFO("noise data ERR [%d]: [%d] > [%d] > [%d] \n", i,
+					 ts_data->fts_autotest_offset->fts_noise_data_P[i], ts_data->noise_rawdata[i],
+					 ts_data->fts_autotest_offset->fts_noise_data_N[i]);
+				FTS_TEST_SAVE_ERR("test fail,node(%4d,%4d)=%5d,range=(%5d,%5d)\n",
+						  i / rx_num + 1, i % rx_num + 1, ts_data->noise_rawdata[i],
+						  ts_data->fts_autotest_offset->fts_noise_data_N[i],
+						  ts_data->fts_autotest_offset->fts_noise_data_P[i]);
+				result = false;
+			}
+		}
+
+	} else {
+		TPD_INFO("fts_raw_data_P || fts_raw_data_N is null \n");
+		result = false;
+	}
+
+restore_reg:
+	/* set the origin value */
+	ret = fts_test_write_reg(FACTORY_REG_DATA_SELECT, reg06_val);
+
+	if (ret < 0) {
+		FTS_TEST_SAVE_ERR("restore normalize fail,ret=%d\n", ret);
+	}
+
+	ret = fts_test_write_reg(FACTORY_REG_FIR, fir);
+
+	if (ret < 0) {
+		FTS_TEST_SAVE_ERR("restore 0xFB fail,ret=%d\n", ret);
+	}
+
+test_err:
+	FTS_TEST_FUNC_EXIT();
+
+	if (result) {
+		return TEST_RESULT_NORMAL;
+
+	} else {
+		return TEST_RESULT_ABNORMAL;
+	}
+}
 
 int ft3419u_rawdata_autotest(struct seq_file *s, void *chip_data,
                             struct auto_testdata *focal_testdata, struct test_item_info *p_test_item_info)
@@ -2419,6 +2605,11 @@ int ft3419u_auto_endoperation(struct seq_file *s, void *chip_data,
 	if (ts_data->panel_differ) {
 		kfree(ts_data->panel_differ);
 		ts_data->panel_differ = NULL;
+	}
+
+	if (ts_data->noise_rawdata) {
+		kfree(ts_data->noise_rawdata);
+		ts_data->noise_rawdata = NULL;
 	}
 
 	enter_work_mode();

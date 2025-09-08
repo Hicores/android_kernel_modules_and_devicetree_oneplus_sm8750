@@ -38,3 +38,54 @@ void iris_mult_addr_pad_i7p(uint8_t **p, uint32_t *poff, uint32_t left_len)
 		break;
 	}
 }
+
+uint32_t iris_convert_dsi_to_i2c_i7p(uint8_t *payload)
+{
+	uint8_t slot;
+	uint32_t header, address;
+	uint32_t *pval = (uint32_t *)payload;
+
+	header = cpu_to_le32(pval[0]);
+	address = cpu_to_le32(pval[1]);
+	IRIS_LOGD("%s,%d: header = 0x%08x, addr = 0x%08x", __func__, __LINE__, pval[0], pval[1]);
+
+	if ((header & 0xf) == 0xc) {  //direct bus
+		slot = (header >> 24) & 0xf;
+		switch (slot) {
+		case 0:
+		case 1:
+			header = 0x00000000;
+			break;
+		case 2:
+			header = 0x00000000;
+			if (address >= 0x6800 && address < 0x6E5C)
+				address += 0xF1680000;
+			else if (address >= 0x6E60 && address < 0x7300)
+				address += 0xF1680000;
+			break;
+		case 3:
+			header = 0x00000000;
+			if ((address >= 0x6380) && (address < 0x67FC)) {
+				address += 0xF1680000;
+			} else if ((address >= 0x7800) && (address < 0x7BFC)) {
+				address += 0xF1680000;
+			} else if ((address >= 0x7C00) && (address < 0x8000)) {
+				address += 0xF1680000;
+			} else if ((address >= 0x8000) && (address < 0x1BEEC)) {
+				address += 0xF1680000;
+			} else if (address >= 0x1BEF0 && address < 0x2FDE0) {
+				//address += (0xF16C0000 + 0x8000 - 0x1BEF0);
+				address += 0xF16AC110;
+			} else {
+				IRIS_LOGE("%s(): invalid addr in slot 3\n", __func__);
+				return -EINVAL;
+			}
+			break;
+		default:
+			IRIS_LOGE("%s(): invalid direct bus slot num %d\n", __func__, slot);
+			return -EINVAL;
+		}
+	}
+	IRIS_LOGD("%s,%d: header = 0x%08x, addr = 0x%08x", __func__, __LINE__, header, address);
+	return address;
+}

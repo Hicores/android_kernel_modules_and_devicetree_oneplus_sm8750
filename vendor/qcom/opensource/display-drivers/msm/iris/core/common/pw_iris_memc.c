@@ -515,3 +515,11 @@ u32 iris_disable_mipi1_autorefresh_get(void)
 
 	return memc_func.disable_mipi1_autorefresh();
 }
+
+void iris_exit_abyp_update_panel_ap_te(void *handle, u32 new_te)
+{
+	if (!memc_func.exit_abyp_update_panel_ap_te)
+		return;
+
+	memc_func.exit_abyp_update_panel_ap_te(handle, new_te);
+}

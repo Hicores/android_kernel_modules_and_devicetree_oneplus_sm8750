@@ -179,15 +179,40 @@ void iris_dsi_write_mult_vals(u32 size, u32 *pvalues)
 	kfree(p_iris_ocp_cmd);
 }
 
+static void _iris_i2c_write_mult_vals(u32 size, u32 *pvalues)
+{
+	int ret = 0;
+	int i = 0;
+	struct iris_cfg *pcfg = iris_get_cfg();
+
+	if (size % 2 != 0) {
+		IRIS_LOGE("%s(), need to be mult pair of address and value", __func__);
+		return;
+	}
+
+	while (i < size) {
+		ret |= pcfg->iris_i2c_write(pvalues[i], pvalues[i+1]);
+		i += 2;
+	}
+
+	if (ret)
+		IRIS_LOGE("%s(%d), i2c send fail, return: %d",
+				__func__, __LINE__, ret);
+}
+
 /*pvalues need to be one address and one value*/
 void iris_ocp_write_mult_vals(u32 size, u32 *pvalues)
 {
 	struct iris_cfg *pcfg = iris_get_cfg();
+	int path = pcfg->iris_i2c_preload ? PATH_I2C : PATH_DSI;
 
 	if (pcfg->iris_chip_type == CHIP_IRIS5 &&
 		pcfg->pw_chip_func_ops.iris_ocp_write_mult_vals_i5_)
 		pcfg->pw_chip_func_ops.iris_ocp_write_mult_vals_i5_(size, pvalues);
-	else {
+	else if (pcfg->force_i2c_type || path == PATH_I2C) {
+		_iris_i2c_write_mult_vals(size, pvalues);
+		IRIS_LOGD("%s(%d), path select i2c", __func__, __LINE__);
+	} else {
 		iris_dsi_write_mult_vals(size, pvalues);
 		IRIS_LOGD("%s(%d), path select dsi", __func__, __LINE__);
 	}
@@ -497,7 +522,7 @@ static void _iris_pt_init_tx_cmd_hdr(
 
 	memset(header, 0x00, sizeof(*header));
 	header->stHdr.dtype = dtype;
-	header->stHdr.linkState = (cmdset->state == IRIS_CMD_SET_STATE_LP) ? 1 : 0;
+	header->stHdr.linkState =  0;
 }
 
 static void _iris_pt_set_cmd_hdr(
@@ -950,6 +975,8 @@ static int _iris_pt_write_max_pkt_size(struct iris_cmd_set *cmdset)
 	max_pktsize[0] = (rlen & 0xFF);
 	memset(&local_cmdset, 0x00, sizeof(local_cmdset));
 
+	local_cmdset.state = IRIS_CMD_SET_STATE_HS;
+
 	_iris_pt_switch_cmd(&local_cmdset, &pkt_size_cmd);
 	rc = _iris_pt_write_panel_cmd(&local_cmdset);
 
@@ -963,6 +990,8 @@ static int _iris_pt_send_panel_rdcmd(struct iris_cmd_set *cmdset)
 	int rc = 0;
 
 	memset(&local_cmdset, 0x00, sizeof(local_cmdset));
+
+	local_cmdset.state = cmdset->state;
 
 	_iris_pt_switch_cmd(&local_cmdset, dsi_cmd);
 

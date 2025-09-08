@@ -3,6 +3,7 @@
 
 #include <linux/version.h>
 #include "oplus_chg_symbol.h"
+#include <linux/rtc.h>
 
 extern int oplus_log_level;
 

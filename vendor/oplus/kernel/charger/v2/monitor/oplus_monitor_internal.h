@@ -113,6 +113,7 @@ struct oplus_monitor {
 	struct mms_subscribe *retention_subs;
 	struct oplus_mms *plc_topic;
 	struct mms_subscribe *plc_subs;
+	struct oplus_mms *pps_topic;
 
 	struct oplus_chg_track *track;
 

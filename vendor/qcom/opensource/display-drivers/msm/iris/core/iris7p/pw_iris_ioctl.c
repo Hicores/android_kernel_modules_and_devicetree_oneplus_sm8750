@@ -789,6 +789,9 @@ int iris_configure_get_i7p(u32 display, u32 type, u32 count, u32 *values)
 		*values = 0;
 		break;
 	case IRIS_PARAM_VALID:
+		IRIS_LOGD("%s send_cont_splash:%p", __func__, pcfg->lightup_ops.send_cont_splash);
+		if (pcfg->lightup_ops.send_cont_splash)
+			pcfg->lightup_ops.send_cont_splash();
 		*values = pcfg->valid;
 		break;
 	case IRIS_GET_METADATA:

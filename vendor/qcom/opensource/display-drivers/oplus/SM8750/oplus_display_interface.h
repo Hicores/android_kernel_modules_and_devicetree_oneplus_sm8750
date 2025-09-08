@@ -111,6 +111,7 @@ struct oplus_display_ops {
 	void (*dsi_message_tx_pre)(struct dsi_ctrl *dsi_ctrl, struct dsi_cmd_desc *cmd_desc);
 	void (*dsi_message_tx_post)(struct dsi_ctrl *dsi_ctrl, struct dsi_cmd_desc *cmd_desc);
 	int (*panel_parse_cmd_sets_sub)(struct dsi_panel_cmd_set *cmd, const char *state);
+	void (*dsi_ctrl_configure_pre)(struct dsi_ctrl *dsi_ctrl, u32 *sched_line_no);
 
 	/* aod */
 	void (*panel_set_lp1)(struct dsi_panel *panel);

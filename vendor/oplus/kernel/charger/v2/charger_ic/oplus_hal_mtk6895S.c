@@ -63,7 +63,11 @@
 #ifdef OPLUS_FEATURE_CHG_BASIC
 #include <linux/usb/typec.h>
 #include <oplus_chg_pps.h>
+#if IS_ENABLED(CONFIG_OPLUS_PD_MANAGER_CHARGER)
+#include <tcpci.h>
+#else
 #include "../../../misc/mediatek/typec/tcpc/inc/tcpci.h"
+#endif
 #include <oplus_chg_wls.h>
 #include <oplus_chg_monitor.h>
 
@@ -1016,6 +1020,10 @@ static void mtk_charger_parse_dt(struct mtk_charger *info,
 	u32 val = 0;
 	struct device_node *boot_node = NULL;
 	struct tag_bootmode *tag = NULL;
+	int ret = 0;
+	int i = 0;
+	unsigned int support_subboard_parameter[SUPPORT_PARAMETER_SIZE] = {0};
+	struct temp_param subboard_table[SUPPORT_TABLE_SIZE / 2] = {{0, 0}, };
 
 	boot_node = of_parse_phandle(dev->of_node, "bootmode", 0);
 	if (!boot_node)
@@ -1347,6 +1355,40 @@ static void mtk_charger_parse_dt(struct mtk_charger *info,
 	info->ntc_temp_volt_1840mv = of_property_read_bool(np, "oplus,ntc_temp_volt_1840mv");
 	chr_debug("%s: support_ntc_01c_precision: %d, support_subboard_ntc = %d\n",
 		__func__, info->support_ntc_01c_precision, info->support_subboard_ntc);
+
+	ret = read_signed_data_from_node(np, "oplus,support_subboard_parameter",
+			(s32 *)(support_subboard_parameter), SUPPORT_PARAMETER_SIZE);
+	if (ret < 0) {
+		info->subboard_parameters.parameters_support = 0;
+		info->subboard_parameters.table_support = 0;
+	} else {
+		info->subboard_parameters.parameters_support = support_subboard_parameter[0];
+		info->subboard_parameters.table_support = support_subboard_parameter[1];
+		info->subboard_parameters.i_tap_over_critical_low = support_subboard_parameter[2];
+		info->subboard_parameters.i_rap_pull_up_r = support_subboard_parameter[3];
+		info->subboard_parameters.i_rap_pull_up_voltage = support_subboard_parameter[4];
+		info->subboard_parameters.i_tap_min = support_subboard_parameter[5];
+		info->subboard_parameters.i_tap_max = support_subboard_parameter[6];
+		info->subboard_parameters.i_25c_volt = support_subboard_parameter[7];
+		ret = read_signed_data_from_node(np, "oplus,support_subboard_table",
+			(s32 *)subboard_table, SUPPORT_TABLE_SIZE);
+		if (ret < 0) {
+			info->subboard_parameters.table_support = 0;
+		} else {
+			info->support_subboard_table = vmalloc(sizeof(struct temp_param *) * SUPPORT_TABLE_SIZE / 2);
+			if (info->support_subboard_table) {
+				for (i = 0; i < SUPPORT_TABLE_SIZE / 2; i++) {
+					info->support_subboard_table[i].temperature_r = subboard_table[i].temperature_r;
+					info->support_subboard_table[i].bts_temp = subboard_table[i].bts_temp;
+				}
+			}
+		}
+		chr_debug("%s:%d, %d, %d, %d,%d, %d, %d, %d\n", __func__, info->subboard_parameters.parameters_support,
+				info->subboard_parameters.table_support, info->subboard_parameters.i_tap_over_critical_low,
+				info->subboard_parameters.i_rap_pull_up_r, info->subboard_parameters.i_rap_pull_up_voltage,
+				info->subboard_parameters.i_tap_min, info->subboard_parameters.i_tap_max,
+				info->subboard_parameters.i_25c_volt);
+	}
 
 	if (of_property_read_u32(np, "oplus,sub_board_pull_up_r", &val) >= 0)
 		info->sub_board_pull_up_r = val;
@@ -7435,6 +7477,7 @@ static int oplus_get_subboard_temp(void)
 	int sub_board_temp = 0;
 	static bool is_param_init = false;
 	static struct ntc_temp ntc_param = {0};
+	int i = 0;
 
 	if (!pinfo) {
 		chg_err("null pinfo\n");
@@ -7453,7 +7496,23 @@ static int oplus_get_subboard_temp(void)
 		ntc_param.i_table_size = (sizeof(sub_board_temp_table) / sizeof(struct temp_param));
 		is_param_init = true;
 
-		if (pinfo->sub_board_pull_up_r)
+		if (pinfo->subboard_parameters.parameters_support) {
+			ntc_param.i_tap_over_critical_low = pinfo->subboard_parameters.i_tap_over_critical_low;
+			ntc_param.i_rap_pull_up_r = pinfo->subboard_parameters.i_rap_pull_up_r;
+			ntc_param.i_rap_pull_up_voltage = pinfo->subboard_parameters.i_rap_pull_up_voltage;
+			ntc_param.i_tap_min = pinfo->subboard_parameters.i_tap_min;
+			ntc_param.i_tap_max = pinfo->subboard_parameters.i_tap_max;
+			ntc_param.i_25c_volt = pinfo->subboard_parameters.i_25c_volt;
+			if (pinfo->subboard_parameters.table_support && pinfo->support_subboard_table) {
+				for (i = 0; i < SUPPORT_TABLE_SIZE / 2; i++) {
+					ntc_param.pst_temp_table[i].temperature_r = pinfo->support_subboard_table[i].temperature_r;
+					ntc_param.pst_temp_table[i].bts_temp = pinfo->support_subboard_table[i].bts_temp;
+				}
+				ntc_param.i_table_size = (SUPPORT_TABLE_SIZE / 2);
+				kvfree(pinfo->support_subboard_table);
+				pinfo->support_subboard_table = NULL;
+			}
+		} else if (pinfo->sub_board_pull_up_r)
 			ntc_param.i_rap_pull_up_r = pinfo->sub_board_pull_up_r;
 		chg_info("ntc_type:%d,critical_low:%d,pull_up_r=%d,pull_up_voltage=%d,tap_min=%d,tap_max=%d,table_size=%d\n", \
 			ntc_param.e_ntc_type, ntc_param.i_tap_over_critical_low, ntc_param.i_rap_pull_up_r, \

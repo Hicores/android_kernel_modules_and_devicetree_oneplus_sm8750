@@ -67,6 +67,12 @@
 #define DIRECT_BUS_HEADER_SIZE 8
 #define IRIS_DBG_TOP_DIR "iris"
 
+#define IRIS_FPS_144 144
+#define IRIS_FPS_120 120
+#define IRIS_FPS_90 90
+#define IRIS_FPS_60 60
+#define IRIS_FPS_30 30
+
 // bit mask
 #define	BIT_MSK(bit)			((uint32_t)1 << (bit))
 
@@ -1307,6 +1313,7 @@ typedef void (*iris_set_esd_status_cb)(bool enable);
 typedef int (*iris_debug_display_info_get_cb)(char *kbuf, int size);
 typedef int (*iris_wait_vsync_cb)(void);
 typedef void (*iris_send_pwil_cmd_cb)(struct iris_cmd_set *, u32 addr,  u32);
+typedef void (*iris_send_cont_splash_cb)(void);
 
 typedef void (*iris_change_header_cb)(void  *pcmd_comp);
 struct iris_lightup_ops {
@@ -1319,6 +1326,7 @@ struct iris_lightup_ops {
 	iris_wait_vsync_cb wait_vsync;
 	iris_send_pwil_cmd_cb send_pwil_cmd;
 	iris_change_header_cb change_header;
+	iris_send_cont_splash_cb send_cont_splash;
 };
 
 typedef int (*iris_configure_get_i7_selected_cb)(u32 display, u32 type, u32 count, u32 *values);
@@ -1384,6 +1392,7 @@ struct iris_cfg;
 struct iris_memc_func {
 	void (*register_osd_irq)(void *disp);
 	void (*update_panel_ap_te)(void *handle, u32 new_te);
+	void (*exit_abyp_update_panel_ap_te)(void *handle, u32 new_te);
 	void (*inc_osd_irq_cnt)(void);
 	bool (*is_display1_autorefresh_enabled)(bool is_secondary);
 	u32 (*disable_mipi1_autorefresh)(void);
@@ -1493,6 +1502,7 @@ typedef void (*iris_send_frc2frc_diff_pkt_cb)(u8 fps);
 typedef void (*iris_send_meta_cb)(void *cmdq_handle, u32 right_bottom);
 typedef u32 (*iris_send_win_corner_cb)(u8 step, u32 left_top, u32 right_bottom);
 typedef void (*iris_delay_win_corner_cb)(u8 step, u32 delay_ms);
+typedef uint32_t (*iris_convert_dsi_to_i2c_cb)(u8 *payload);
 
 #if 0
 typedef void (*iris_init_timing_switch_cb)(void);
@@ -1581,6 +1591,7 @@ struct pw_chip_func_register_ops {
 	iris_send_meta_cb iris_send_meta_;
 	iris_send_win_corner_cb iris_send_win_corner_;
 	iris_delay_win_corner_cb iris_delay_win_corner_;
+	iris_convert_dsi_to_i2c_cb iris_convert_dsi_to_i2c;
 };
 
 enum IRIS_PARAM_VALID {
@@ -1979,6 +1990,11 @@ struct iris_cfg {
 	u32 vm_cmd_tag;
 	struct iris_condition_wq frame_done;
 	struct iris_condition_wq frame_start;
+
+	bool ocp_write_by_i2c;
+	bool force_i2c_type;
+	bool disable_dtg_eco;
+	uint32_t panel_backlight_in_pt;
 };
 
 #endif // _DSI_IRIS_DEF_H_

@@ -133,7 +133,7 @@ static void __iris_convert_dsi_to_i3c(uint8_t *payload, uint32_t len)
 				offset = address - 0x28000;
 				address = 0xF1640400 + offset;
 			} else {
-				IRIS_LOGE("%s(): invalid address in slot 3\n", __func__);
+				IRIS_LOGE("%s(): invalid addr in slot 3\n", __func__);
 				return;
 			}
 			break;

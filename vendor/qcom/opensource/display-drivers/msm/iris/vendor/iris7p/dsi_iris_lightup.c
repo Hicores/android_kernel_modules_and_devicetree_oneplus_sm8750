@@ -101,6 +101,7 @@ void iris_init_i7p(struct dsi_display *display, struct dsi_panel *panel)
 	pcfg->bl_max_level = panel->bl_config.bl_max_level;
 	pcfg->crtc0_old_interval = 0;
 	pcfg->dsi_dev = NULL;
+	pcfg->panel_backlight_in_pt = 0;
 
 	atomic_set(&pcfg->fod_cnt, 0);
 

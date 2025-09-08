@@ -161,6 +161,77 @@ int iris_pure_i2c_single_write(uint32_t addr, uint32_t val)
 	return ret;
 }
 
+int iris_pure_i2c_mult_single_write(struct iris_i2c_msg *dsi_msg)
+{
+	int ret = 0;
+	int i = 0;
+	int pos = 0;
+	struct i2c_msg *msgs;
+	uint32_t addr, val;
+	const int reg_len = 9;
+	uint8_t *data = NULL;
+	uint8_t *data_list = NULL;
+	uint32_t *pval = (uint32_t *)dsi_msg->buf;
+	/*f4 need to one value one address */
+	uint32_t sum = dsi_msg->len >> 3;
+
+	if (!iris_pure_i2c_handle) {
+		IRIS_LOGE("%s, %d: the parameter is not right\n", __func__, __LINE__);
+		return -EINVAL;
+	}
+
+	data_list = kmalloc(9 * sum, GFP_KERNEL);
+	if (!data_list) {
+		IRIS_LOGE("%s, %d: allocate memory fails\n", __func__, __LINE__);
+		return -ENOMEM;
+	}
+
+	msgs = kmalloc_array(sum, sizeof(struct i2c_msg), GFP_KERNEL);
+	if (!msgs)
+		goto FREE_BUFFER;
+	memset(msgs, 0x00, sum * sizeof(struct i2c_msg));
+
+	for (i = 0; i < sum; i++) {
+		pos = reg_len *  i;
+		addr = pval[2 * i];
+		val = pval[2 * i + 1];
+
+		data_list[pos] = 0xcc;
+		data_list[pos + 1] = (addr >> 0) & 0xff;
+		data_list[pos + 2] = (addr >> 8) & 0xff;
+		data_list[pos + 3] = (addr >> 16) & 0xff;
+		data_list[pos + 4] = (addr >> 24) & 0xff;
+		data_list[pos + 5] = (val >> 24) & 0xff;
+		data_list[pos + 6] = (val >> 16) & 0xff;
+		data_list[pos + 7] = (val >> 8) & 0xff;
+		data_list[pos + 8] = (val >> 0) & 0xff;
+
+		data = &data_list[pos];
+
+		msgs[i].addr = (iris_pure_i2c_handle->addr & 0xff);
+		msgs[i].flags = 0;
+		msgs[i].buf = data;
+		msgs[i].len = reg_len;
+		IRIS_LOGD("%s addr:%x data:%x", __func__, addr, val);
+	}
+
+	ret = i2c_transfer(iris_pure_i2c_handle->adapter, msgs, sum);
+	if (ret == sum) {
+		ret = 0;
+	} else {
+		ret = ret < 0 ? ret : -EIO;
+		IRIS_LOGE("%s, %d: i2c_transfer failed, write cmd, addr = 0x%08x, ret = %d\n",
+			__func__, __LINE__, addr, ret);
+	}
+
+	kfree(msgs);
+	msgs = NULL;
+FREE_BUFFER:
+	kfree(data_list);
+	data_list = NULL;
+	return ret;
+}
+
 int iris_pure_i2c_burst_write(uint32_t addr, uint32_t *val, uint16_t reg_num)
 {
 
@@ -218,77 +289,15 @@ int iris_pure_i2c_burst_write(uint32_t addr, uint32_t *val, uint16_t reg_num)
 
 }
 
-static void __iris_convert_dsi_to_i2c(uint8_t *payload, uint32_t len)
-{
-	uint8_t slot, gap;
-	uint32_t header, address, i;
-	uint32_t *pval = (uint32_t *)(payload + 1);
-
-	header = cpu_to_le32(pval[0]);
-	address = cpu_to_le32(pval[1]);
-	IRIS_LOGI("%s,%d: header = 0x%08x, addr = 0x%08x", __func__, __LINE__, pval[0], pval[1]);
-
-	if ((header & 0xf) == 0xc) {  //direct bus
-		slot = (header >> 24) & 0xf;
-		switch (slot) {
-		case 0:
-		case 1:
-			header = 0x00000000;
-			break;
-		case 2:
-			header = 0x00000000;
-			address += 0xFF200000;
-			break;
-		case 3:
-			header = 0x00000000;
-			if ((address >= 0x7380) && (address < 0x1BEF0)) {
-				address += 0xFF200000;
-			} else if ((address >= 0x1BEF0) && (address < 0x2FDE0)) {
-				address += 0xFF220000;
-			} else if ((address >= 0x108000) && (address < 0x11BEF0)) {
-				address += 0xFF240000;
-			} else if ((address >= 0x11BEF0) && (address < 0x12FDE0)) {
-				address += 0xFF260000;
-			} else {
-				IRIS_LOGE("%s(): invalid address in slot 3\n", __func__);
-				return;
-			}
-			break;
-		default:
-			IRIS_LOGE("%s(): invalid direct bus slot num %d\n", __func__, slot);
-			return;
-		}
-		pval[0] = header;
-		pval[1] = address;
-	}
-
-	if (pval[0] == 0xfffffff4) {
-		payload[0] = 0xcc;
-		gap = 2;
-	} else {
-		payload[0] = 0xfc;
-		gap = 1;
-	}
-
-	for (i = 2; i < (len - 1)/4;) {
-		pval[i] = cpu_to_be32(pval[i]);
-		i += gap;
-	}
-
-	IRIS_LOGI("%s,%d: header = 0x%08x, addr = 0x%08x", __func__, __LINE__, pval[0], pval[1]);
-	memcpy(&payload[1], &payload[5], len - 5);
-	for (i = 0; i < len - 4; i++)
-		IRIS_LOGD("%s,%d: payload[%d] = 0x%02x", __func__, __LINE__, i, payload[i]);
-}
-
 int iris_pure_i2c_multi_write(struct iris_i2c_msg *dsi_msg, uint32_t msg_num)
 {
 
 	int ret = -1;
 	uint32_t i = 0;
+	uint32_t addr;
 	uint32_t byte_count = 0;
 	uint32_t total_len = 0;
-	struct i2c_msg *i2c_msg;
+	struct iris_cfg *pcfg = iris_get_cfg();
 
 	if ((dsi_msg == NULL) || (msg_num == 0)) {
 		IRIS_LOGE("%s, %d: pbuf is NULL or num = 0\n", __func__, __LINE__);
@@ -308,43 +317,25 @@ int iris_pure_i2c_multi_write(struct iris_i2c_msg *dsi_msg, uint32_t msg_num)
 		}
 	}
 
-	i2c_msg = vmalloc(sizeof(struct i2c_msg) * msg_num);
-	if (!i2c_msg) {
-		IRIS_LOGE("%s, %d: allocate memory fails\n", __func__, __LINE__);
-		return -ENOMEM;
-	}
-
 	for (i = 0; i < msg_num; i++) {
+		uint32_t *payload = (uint32_t *)dsi_msg[i].buf;
+		ret = -EINVAL;
 		byte_count = dsi_msg[i].len;
-		i2c_msg[i].buf = kmalloc(byte_count + 1, GFP_KERNEL);
-		if (!i2c_msg[i].buf) {
-			IRIS_LOGE("%s, %d: allocate memory fails\n", __func__, __LINE__);
-			ret = -ENOMEM;
-			goto error;
+		if (!pcfg->pw_chip_func_ops.iris_convert_dsi_to_i2c)
+			return ret;
+		if (payload[0] == 0xFFFFFFF4) {
+			struct iris_i2c_msg msg = {
+				.buf = dsi_msg[i].buf + 4,
+				.len = byte_count - 4,
+			};
+			ret = iris_pure_i2c_mult_single_write(&msg);
+		} else {
+			/*obtain ocp for directbus or burst address*/
+			addr = pcfg->pw_chip_func_ops.iris_convert_dsi_to_i2c(dsi_msg[i].buf);
+			ret = iris_pure_i2c_burst_write(addr, payload + 2, (byte_count - 8) >> 2);
 		}
-
-		i2c_msg[i].addr = (iris_pure_i2c_handle->addr) & 0xff;
-		i2c_msg[i].flags = 0;
-		i2c_msg[i].len = byte_count + 1 - 4;
-		memcpy(i2c_msg[i].buf + 1, dsi_msg[i].buf, byte_count);
-		__iris_convert_dsi_to_i2c(i2c_msg[i].buf, byte_count + 1);
+		//IRIS_LOGI("-----header:%08x, addr:%08x", payload[0], payload[1]);
 	}
-
-	ret = i2c_transfer(iris_pure_i2c_handle->adapter, i2c_msg, msg_num);
-	if (ret == msg_num) {
-		ret = 0;
-	} else {
-		ret = ret < 0 ? ret : -EIO;
-		IRIS_LOGE("%s: i2c_transfer failed, ret=%d\n", __func__, ret);
-	}
-
-error:
-	for (i = 0; i < msg_num; i++) {
-		kfree(i2c_msg[i].buf);
-		i2c_msg[i].buf = NULL;
-	}
-	vfree(i2c_msg);
-	i2c_msg = NULL;
 	return ret;
 }
 

@@ -44,6 +44,7 @@ struct iris_cmd_comp {
 	struct iris_cmd_desc *cmd;
 	enum iris_op_type op_type;
 	enum iris_send_mode send_mode;
+	void *handle;
 };
 
 /*use to parse dtsi cmd list*/
@@ -119,6 +120,7 @@ void iris_free_ipopt_buf(uint32_t ip_type);
 void iris_free_seq_space(void);
 
 void iris_send_assembled_pkt(struct iris_ctrl_opt *arr, int seq_cnt);
+void iris_send_assembled_pkt_mtk(void *handle, struct iris_ctrl_opt *arr, int seq_cnt);
 int32_t iris_parse_dtsi_cmd(const struct device_node *lightup_node,
 		uint32_t cmd_index);
 int32_t iris_parse_optional_seq(struct device_node *np, const uint8_t *key,
@@ -173,4 +175,7 @@ bool iris_check_seq_ipopt(u32 ip, u32 opt);
 void iris_lightup_setup_frc_cmd_list(void);
 void iris_lightup_setup_rfb_frc_entry_mode(void);
 void iris_lightup_switch_rfb_mode(void);
+uint32_t iris_convert_dsi_to_i2c_i7p(uint8_t *payload);
+uint32_t iris_convert_dsi_to_i2c_i8(uint8_t *payload);
+uint32_t iris_convert_dsi_to_i2c_i5(uint8_t *payload);
 #endif // _DSI_IRIS_LIGHTUP_H_

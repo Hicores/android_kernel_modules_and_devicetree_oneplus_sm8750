@@ -70,5 +70,7 @@
 
 #define TCPC_V10_REG_EXTENDED_STATUS			(1<<13)
 
+#define MASK_EXT_STATUS  				0x60
+
 #endif /* __LINUX_UPM7610_H */
 

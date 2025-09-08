@@ -22,7 +22,9 @@ ccflags-y += -Werror=format
 ccflags-y += -DOPLUS_CHG_KO_BUILD
 
 ifeq ($(CONFIG_OPLUS_CHARGER_MTK),y)
+ifndef CONFIG_OPLUS_PD_EXT_SUPPORT
 subdir-ccflags-y += -I$(DEVICE_MODULES_PATH)/drivers/misc/mediatek/typec/tcpc/inc
+endif
 subdir-ccflags-y += -I$(DEVICE_MODULES_PATH)/drivers/misc/mediatek/include/mt-plat
 subdir-ccflags-y += -I$(DEVICE_MODULES_PATH)/drivers/misc/mediatek/include
 

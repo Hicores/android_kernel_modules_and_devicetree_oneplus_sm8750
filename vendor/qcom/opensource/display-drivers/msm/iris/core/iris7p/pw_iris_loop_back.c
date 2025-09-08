@@ -141,6 +141,7 @@ static int iris_internal_pt_verify(void)
 int iris_loop_back_validate_i7p(void)
 {
 	int ret = 0;
+	struct iris_cfg *pcfg = iris_get_cfg();
 
 	if (iris_loop_back_flag_i7p & BIT_INTERNAL_PT) {
 		IRIS_LOGI("%s(%d), step 1, internal pt loop back verify!", __func__, __LINE__);
@@ -154,8 +155,10 @@ int iris_loop_back_validate_i7p(void)
 	iris_loop_back_reset();
 	mdelay(10);
 	iris_bulksram_power_domain_proc_i7p();
-	//iris_disable_temp_sensor();
-	iris_sleep_abyp_power_down();
+	if (pcfg && (pcfg->rx_mode == IRIS_CMD_MODE)) {
+		iris_bulksram_power_domain_proc_i7p();
+		iris_sleep_abyp_power_down();
+	}
 
 	IRIS_LOGI("%s(%d), loop back test all passed!", __func__, __LINE__);
 

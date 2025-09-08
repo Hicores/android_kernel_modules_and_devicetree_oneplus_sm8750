@@ -598,7 +598,7 @@ static int config_battery_profile_switch(struct cw_battery *cw_bat, unsigned cha
 		}
 	}
 
-	return ret;
+	return i;
 }
 
 static int update_flag_and_soc_intterrupt_value(struct cw_battery *cw_bat)
@@ -659,7 +659,7 @@ CW_EXECUTE_CMD_RETRY:
 		return ret;
 	}
 
-	if (cw_bat->debug_force_cw_err || i != SIZE_OF_PROFILE) {
+	if (cw_bat->debug_force_cw_err || ret != SIZE_OF_PROFILE) {
 		retry_times++;
 		chg_err("Failed at [%d, %d]\n", reg_val, retry_times);
 		if (retry_times < CW_INIT_RETRY_MAX) {
@@ -691,24 +691,11 @@ CW_EXECUTE_CMD_RETRY:
 	return NUM_0;
 }
 
-/*
- * Get the cw2217 running state
- * Determine whether the profile needs to be updated
-*/
-static int cw2217_get_state(struct cw_battery *cw_bat)
+static int cw2217_battery_profile_init(struct cw_battery *cw_bat)
 {
-	int ret;
+	int ret = NUM_0, reg_profile = NUM_0;
 	unsigned char reg_val;
 	int i;
-	int reg_profile;
-
-	ret = cw_read(cw_bat->client, REG_MODE_CONFIG, &reg_val);
-	if (reg_val != CONFIG_MODE_ACTIVE)
-		return CW2217_NOT_ACTIVE;
-
-	ret = cw_read(cw_bat->client, REG_SOC_ALERT, &reg_val);
-	if (NUM_0 == (reg_val & CONFIG_UPDATE_FLG))
-		return CW2217_PROFILE_NOT_READY;
 
 	for (i = NUM_0; i < SIZE_OF_PROFILE; i++) {
 		ret = cw_read(cw_bat->client, (REG_BAT_PROFILE + i), &reg_val);
@@ -724,7 +711,32 @@ static int cw2217_get_state(struct cw_battery *cw_bat)
 				break;
 		}
 	}
-	if (i != SIZE_OF_PROFILE)
+
+	return i;
+}
+
+/*
+ * Get the cw2217 running state
+ * Determine whether the profile needs to be updated
+*/
+static int cw2217_get_state(struct cw_battery *cw_bat)
+{
+	int ret;
+	unsigned char reg_val;
+
+	ret = cw_read(cw_bat->client, REG_MODE_CONFIG, &reg_val);
+	if (ret < NUM_0)
+		return ret;
+	if (reg_val != CONFIG_MODE_ACTIVE)
+		return CW2217_NOT_ACTIVE;
+
+	ret = cw_read(cw_bat->client, REG_SOC_ALERT, &reg_val);
+	if (ret < NUM_0)
+		return ret;
+	if (NUM_0 == (reg_val & CONFIG_UPDATE_FLG))
+		return CW2217_PROFILE_NOT_READY;
+
+	if (cw2217_battery_profile_init(cw_bat) != SIZE_OF_PROFILE)
 		return CW2217_PROFILE_NEED_UPDATE;
 
 	return NUM_0;
