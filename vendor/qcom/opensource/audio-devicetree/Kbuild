@@ -35,7 +35,6 @@ dtbo-y += sun-audio.dtbo \
 
 #OPLUS_DTS_OVERLAY start
 dtbo-y += oplus/dodge-23821-audio-sun-overlay.dtbo
-dtbo-y += oplus/hummer-24811-audio-sun-overlay.dtbo
 #OPLUS_DTS_OVERLAY end
 endif
 

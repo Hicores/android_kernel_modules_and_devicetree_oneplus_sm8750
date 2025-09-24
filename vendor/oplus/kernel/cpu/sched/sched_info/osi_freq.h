@@ -16,9 +16,6 @@ void osi_freq_exit(struct proc_dir_entry *pde);
 void osi_cpufreq_transition_handler(struct cpufreq_policy *policy,
 		unsigned int new_freq);
 void get_cpufreq_info(bool *is_sample);
-void jankinfo_update_freq_reach_limit_count(
-			struct cpufreq_policy *policy,
-			u32 old_target_freq, u32 new_target_freq, u32 flags);
 
 void jank_curr_freq_show(struct seq_file *m,
 			u32 win_idx, u64 now);

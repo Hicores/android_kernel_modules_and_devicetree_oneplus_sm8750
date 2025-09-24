@@ -50,6 +50,15 @@
         };
 };
 
+&reserved_memory {
+	// #ifdef OPLUS_FEATURE_UFF_FINGERPRINT
+	/* ref: platform/vendor/qcom-opensource/devicetree ---> qcom/sun.dtsi */
+	qseecom_ta_region_cust {
+		status = "disabled";
+	};
+	// #endif /* OPLUS_FEATURE_UFF_FINGERPRINT */
+};
+
 &pmk8550 {
 //#ifdef CONFIG_OPLUS_FEATURE_QCOM_PMICWD
 //pmicwd depend on pon_pbs@800

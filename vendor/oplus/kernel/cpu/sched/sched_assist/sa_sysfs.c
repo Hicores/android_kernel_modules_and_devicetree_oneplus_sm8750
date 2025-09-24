@@ -185,7 +185,7 @@ static ssize_t proc_sched_group_enabled_read(struct file *file, char __user *buf
 	char buffer[20];
 	size_t len = 0;
 
-	len = snprintf(buffer, sizeof(buffer), "enabled=%d\n", global_sched_group_enabled);
+	len = snprintf(buffer, sizeof(buffer), "%d\n", global_sched_group_enabled);
 
 	return simple_read_from_buffer(buf, count, ppos, buffer, len);
 }

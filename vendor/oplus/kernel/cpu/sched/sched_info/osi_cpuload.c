@@ -56,7 +56,7 @@ void jankinfo_update_time_info(struct rq *rq,
 	u64 runtime = 0, runtime_a, runtime_cnt, runtime_b;
 	u64 runtime_scale, runtime_scale_a, runtime_scale_cnt, runtime_scale_b, total_time, calldelta;
 
-	if (!p)
+	if (unlikely(!p))
 		return;
 
 	cpu = task_cpu(p);
@@ -85,8 +85,6 @@ void jankinfo_update_time_info(struct rq *rq,
 		spin_unlock(&jankinfo_update_time_info_last_calltime_lock);
 		return;
 	}
-
-
 	jankinfo_update_time_info_last_calltime = now;
 	spin_unlock(&jankinfo_update_time_info_last_calltime_lock);
 

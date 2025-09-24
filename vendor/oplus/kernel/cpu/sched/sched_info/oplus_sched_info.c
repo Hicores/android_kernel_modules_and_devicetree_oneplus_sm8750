@@ -36,30 +36,13 @@ void android_vh_account_task_time_handler(void *unused,
 }
 #endif
 
-void android_vh_cpufreq_resolve_freq_handler(void *unused,
-			struct cpufreq_policy *policy, unsigned int *target_freq,
-			unsigned int old_target_freq)
-{
-	jankinfo_update_freq_reach_limit_count(policy,
-				old_target_freq, *target_freq, DO_CLAMP);
-}
-
 void android_vh_cpufreq_fast_switch_handler(void *unused,
 			struct cpufreq_policy *policy, unsigned int *target_freq,
 			unsigned int old_target_freq)
 {
-	jankinfo_update_freq_reach_limit_count(policy,
-		old_target_freq, *target_freq, DO_CLAMP | DO_INCREASE);
 	osi_cpufreq_transition_handler(policy, *target_freq);
 }
 
-void android_vh_cpufreq_target_handler(void *unused,
-			struct cpufreq_policy *policy, unsigned int *target_freq,
-			unsigned int old_target_freq)
-{
-	jankinfo_update_freq_reach_limit_count(policy,
-		old_target_freq, *target_freq, DO_CLAMP);
-}
 
 static int jank_register_hook(void)
 {
@@ -73,12 +56,8 @@ static int jank_register_hook(void)
 			android_vh_account_task_time_handler);
 #endif
 
-	REGISTER_TRACE_VH(android_vh_cpufreq_resolve_freq,
-			android_vh_cpufreq_resolve_freq_handler);
 	REGISTER_TRACE_VH(android_vh_cpufreq_fast_switch,
 			android_vh_cpufreq_fast_switch_handler);
-	REGISTER_TRACE_VH(android_vh_cpufreq_target,
-			android_vh_cpufreq_target_handler);
 
 	return ret;
 }
@@ -95,12 +74,8 @@ static int jank_unregister_hook(void)
 			android_vh_account_task_time_handler);
 #endif
 
-	UNREGISTER_TRACE_VH(android_vh_cpufreq_resolve_freq,
-			android_vh_cpufreq_resolve_freq_handler);
 	UNREGISTER_TRACE_VH(android_vh_cpufreq_fast_switch,
 			android_vh_cpufreq_fast_switch_handler);
-	UNREGISTER_TRACE_VH(android_vh_cpufreq_target,
-			android_vh_cpufreq_target_handler);
 
 	return ret;
 }
@@ -166,9 +141,6 @@ static int __init jank_info_init(void)
 
 	osi_hotthread_proc_init(d_cpu_jank_info);
 	osi_base_proc_init(d_cpu_jank_info);
-#if IS_ENABLED(CONFIG_ARM64_AMU_EXTN)
-	osi_amu_init(d_cpu_jank_info);
-#endif
 	osi_freq_init(d_cpu_jank_info);
 	jank_register_hook();
 	tasktrack_init();
@@ -213,9 +185,6 @@ void __exit __maybe_unused jank_info_exit(void)
 	jank_version_proc_deinit(d_cpu_jank_info);
 	jank_cpuload_proc_deinit(d_cpu_jank_info);
 	osi_hotthread_proc_deinit(d_cpu_jank_info);
-#if IS_ENABLED(CONFIG_ARM64_AMU_EXTN)
-	osi_amu_exit(d_cpu_jank_info);
-#endif
 	osi_freq_exit(d_cpu_jank_info);
 	jank_tasktrack_proc_deinit(d_cpu_jank_info);
 	jank_debug_proc_deinit(d_cpu_jank_info);

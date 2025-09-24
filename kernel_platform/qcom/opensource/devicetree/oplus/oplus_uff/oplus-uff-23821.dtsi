@@ -1,3 +1,6 @@
+// OPLUS UFF FP DTSI
+#include <dt-bindings/arm/msm/qcom_dma_heap_dt_constants.h>
+
 &soc {
 	// #ifdef OPLUS_FEATURE_UFF_FINGERPRINT
 	fingerprint_dev {
@@ -23,6 +26,30 @@
 		};
 	};
 	//#endif /*OPLUS_FEATURE_UFF_FINGERPRINT*/
+};
+
+&reserved_memory {
+	// #ifdef OPLUS_FEATURE_UFF_FINGERPRINT
+	/* ref: platform/vendor/qcom-opensource/devicetree ---> qcom/sun.dtsi */
+	qseecom_ta_region {
+		status = "disabled";
+	};
+	qseecom_ta_region_cust {
+		status = "okay";
+	};
+	// #endif /* OPLUS_FEATURE_UFF_FINGERPRINT */
+};
+
+&soc {
+	// #ifdef OPLUS_FEATURE_UFF_FINGERPRINT
+	/* ref: platform/vendor/qcom-opensource/devicetree ---> qcom/sun-dma-heaps.dtsi */
+	qcom,dma-heaps {
+		qcom,qseecom_ta {
+			qcom,dma-heap-type = <HEAP_TYPE_CARVEOUT>;
+			memory-region = <&qseecom_ta_mem_cust>;
+		};
+	};
+	// #endif /* OPLUS_FEATURE_UFF_FINGERPRINT */
 };
 
 &tlmm {
