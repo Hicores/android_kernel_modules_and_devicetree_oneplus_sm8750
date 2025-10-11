@@ -73,11 +73,6 @@
 #define inherit_ux_offset_of(type)			(type * INHERIT_UX_SEC_WIDTH)
 #define inherit_ux_mask_of(type)			((u64)(INHERIT_UX_MASK_BASE) << (inherit_ux_offset_of(type)))
 
-#ifdef CONFIG_HMBIRD_SCHED
-#include <linux/sched/hmbird.h>
-#include <linux/sched/hmbird_version.h>
-#endif
-
 #define inherit_ux_get_bits(value, type)	((value & inherit_ux_mask_of(type)) >> inherit_ux_offset_of(type))
 #define inherit_ux_value(type, value)		((u64)value << inherit_ux_offset_of(type))
 
@@ -140,14 +135,6 @@ void register_sched_assist_locking_ops(struct sched_assist_locking_ops *ops)
 		pr_warn("sched_assist_locking_ops has already been registered!\n");
 }
 EXPORT_SYMBOL_GPL(register_sched_assist_locking_ops);
-#endif
-
-#ifdef CONFIG_HMBIRD_SCHED
-bool task_is_hmbird(struct task_struct *p)
-{
-	struct hmbird_entity *ts = get_hmbird_ts(p);
-	return p->sched_class == ts->sched_class;
-}
 #endif
 
 #define TOPAPP 4
@@ -863,12 +850,6 @@ inline bool test_task_is_fair(struct task_struct *task)
 {
 	DEBUG_BUG_ON(!task);
 
-#ifdef CONFIG_HMBIRD_SCHED
-	if(HMBIRD_OGKI_VERSION == get_hmbird_version_type()) {
-		if (task_is_hmbird(task))
-			return false;
-	}
-#endif
 	/* valid CFS priority is MAX_RT_PRIO..MAX_PRIO-1 */
 	if ((task->prio >= MAX_RT_PRIO) && (task->prio <= MAX_PRIO-1))
 		return true;
@@ -879,12 +860,6 @@ inline bool test_task_is_rt(struct task_struct *task)
 {
 	DEBUG_BUG_ON(!task);
 
-#ifdef CONFIG_HMBIRD_SCHED
-	if(HMBIRD_OGKI_VERSION == get_hmbird_version_type()) {
-		if (task_is_hmbird(task))
-			return false;
-	}
-#endif
 	/* valid RT priority is 0..MAX_RT_PRIO-1 */
 	if ((task->prio >= 0) && (task->prio <= MAX_RT_PRIO-1))
 		return true;
@@ -1629,47 +1604,10 @@ void android_rvh_find_lowest_rq_handler(void *unused,
 		*best_cpu = cpumask_first(local_cpu_mask);
 }
 
-#ifdef CONFIG_HMBIRD_SCHED
-void scx_sched_fork(struct task_struct *p)
-{
-	struct oplus_task_struct *ots = get_oplus_task_struct(p);
-	struct oplus_task_struct *curr_ots = get_oplus_task_struct(current);
-	if (IS_ERR_OR_NULL(ots))
-		return;
-
-	ots->scx.dsq = NULL;
-	INIT_LIST_HEAD(&ots->scx.dsq_node.fifo);
-	RB_CLEAR_NODE(&ots->scx.dsq_node.priq);
-	ots->scx.flags = 0;
-	ots->scx.dsq_flags = 0;
-	ots->scx.sticky_cpu = -1;
-	ots->scx.runnable_at = INITIAL_JIFFIES;
-	ots->scx.slice = SCX_SLICE_DFL;
-	ots->scx.sched_prop = 0;
-	ots->scx.ext_flags = 0;
-	ots->scx.prio_backup = 0;
-	ots->scx.gdsq_idx = DEFAULT_CGROUP_DL_IDX;
-	memset(&ots->scx.sts, 0, sizeof(struct scx_task_stats));
-	if (!IS_ERR_OR_NULL(curr_ots)) {
-		if ((curr_ots->scx.ext_flags & EXT_FLAG_RT_CHANGED) && !p->sched_reset_on_fork) {
-			ots->scx.ext_flags |= EXT_FLAG_RT_CHANGED;
-			ots->scx.prio_backup = curr_ots->scx.prio_backup;
-		}
-		if (curr_ots->scx.ext_flags & EXT_FLAG_CFS_CHANGED)
-			ots->scx.ext_flags |= EXT_FLAG_CFS_CHANGED;
-	}
-}
-#endif
-
 /* register vender hook in kernel/sched/core.c */
 void android_rvh_sched_fork_handler(void *unused, struct task_struct *p)
 {
 	init_task_ux_info(p);
-#ifdef CONFIG_HMBIRD_SCHED
-	if(HMBIRD_GKI_VERSION == get_hmbird_version_type()) {
-		scx_sched_fork(p);
-	}
-#endif
 }
 
 void android_rvh_after_enqueue_task_handler(void *unused, struct rq *rq, struct task_struct *p, int flags)

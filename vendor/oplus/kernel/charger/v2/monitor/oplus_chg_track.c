@@ -7920,6 +7920,46 @@ static int oplus_chg_track_upload_chg_into_liquid(struct oplus_chg_track *track)
 	return 0;
 }
 
+static int oplus_chg_track_upload_gauge_r_info(struct oplus_chg_track *chip)
+{
+	int index = 0;
+	union mms_msg_data data = { 0 };
+	int rc = 0;
+
+	if (!chip)
+		return -EINVAL;
+
+	mutex_lock(&chip->deep_dischg_info_lock);
+	if (chip->deep_dischg_info_trigger)
+		kfree(chip->deep_dischg_info_trigger);
+
+	chip->deep_dischg_info_trigger = kzalloc(sizeof(oplus_chg_track_trigger), GFP_KERNEL);
+	if (!chip->deep_dischg_info_trigger) {
+		chg_err("deep_dischg_info_trigger memery alloc fail\n");
+		mutex_unlock(&chip->deep_dischg_info_lock);
+		return -ENOMEM;
+	}
+
+	chip->deep_dischg_info_trigger->type_reason = TRACK_NOTIFY_TYPE_GENERAL_RECORD;
+	chip->deep_dischg_info_trigger->flag_reason = TRACK_NOTIFY_FLAG_GAUGE_INFO;
+	index += scnprintf(&(chip->deep_dischg_info_trigger->crux_info[index]), OPLUS_CHG_TRACK_CURX_INFO_LEN - index,
+				  "$$err_scene@@end_r_info");
+	rc = oplus_mms_get_item_data(chip->monitor->err_topic, ERR_ITEM_GAUGE_R_INFO, &data, false);
+	if (rc < 0) {
+		chg_err("get msg data error, rc=%d\n", rc);
+		kfree(chip->deep_dischg_info_trigger);
+		chip->deep_dischg_info_trigger = NULL;
+		mutex_unlock(&chip->deep_dischg_info_lock);
+		return rc;
+	}
+	index += scnprintf(&(chip->deep_dischg_info_trigger->crux_info[index]), OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "%s",
+			  data.strval);
+
+	schedule_delayed_work(&chip->deep_dischg_info_trigger_work, 0);
+	chg_info("success\n");
+	return 0;
+}
+
 static int oplus_chg_track_upload_deep_dischg_profile(struct oplus_chg_track *chip)
 {
 	int index = 0;
@@ -9927,6 +9967,9 @@ static void oplus_chg_track_err_subs_callback(struct mms_subscribe *subs,
 			break;
 		case ERR_ITEM_PLC_INFO:
 			oplus_chg_track_upload_plc_info(track);
+			break;
+		case ERR_ITEM_GAUGE_R_INFO:
+			oplus_chg_track_upload_gauge_r_info(track);
 			break;
 		default:
 			break;

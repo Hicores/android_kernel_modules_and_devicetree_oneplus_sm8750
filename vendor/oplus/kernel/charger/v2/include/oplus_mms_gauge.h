@@ -42,6 +42,7 @@ enum gauge_topic_item {
 	GAUGE_ITEM_QMAX,
 	GAUGE_ITEM_CAR_C,
 	GAUGE_ITEM_RATIO_LIMIT_CURR,
+	GAUGE_ITEM_GAUGE_R_INFO,
 };
 
 enum gauge_type_id {

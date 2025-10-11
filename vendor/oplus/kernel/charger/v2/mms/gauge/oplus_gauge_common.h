@@ -99,6 +99,7 @@ struct oplus_mms_gauge {
 	struct votable *gauge_term_voltage_votable;
 	struct votable *gauge_shutdown_voltage_votable;
 	unsigned char *gauge_reg_info[GAUGE_IC_NUM_MAX];
+	unsigned char *gauge_r_info[GAUGE_IC_NUM_MAX];
 	unsigned char calib_time_str[GAUGE_IC_NUM_MAX][CALIB_TIME_STR_LEN];
 	struct oplus_gauge_lifetime lifetime[GAUGE_IC_NUM_MAX];
 	struct gauge_calib_info_load calib_info_load;

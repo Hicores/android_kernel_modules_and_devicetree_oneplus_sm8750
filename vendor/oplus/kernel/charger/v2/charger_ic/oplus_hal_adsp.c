@@ -8923,6 +8923,49 @@ static int oplus_sm8350_set_calib_time(struct oplus_chg_ic_dev *ic_dev,
 	return 0;
 }
 
+
+static int oplus_sm8350_get_gauge_r_info(struct oplus_chg_ic_dev *ic_dev, u8 *info, int len)
+{
+	struct battery_chg_dev *bcdev;
+	int index = 0;
+	int rc = 0;
+
+	if (ic_dev == NULL || !info) {
+		chg_err("oplus_chg_ic_dev or info is NULL");
+		return -ENODEV;
+	}
+	bcdev = oplus_chg_ic_get_drvdata(ic_dev);
+
+	if (!bcdev || !bcdev->ap_read_buffer_dump)
+		return -ENODEV;
+
+	mutex_lock(&bcdev->ap_read_buffer_lock);
+	rc = ap_set_message_id(bcdev, AP_MESSAGE_GET_GAUGE_R_INFO);
+	if (rc)
+		goto err;
+
+	reinit_completion(&bcdev->ap_read_ack[AP_MESSAGE_GET_GAUGE_R_INFO]);
+	rc = wait_for_completion_timeout(&bcdev->ap_read_ack[AP_MESSAGE_GET_GAUGE_R_INFO],
+					 msecs_to_jiffies(BC_WAIT_TIME_MS));
+	if (!rc) {
+		chg_err("Error, timed out sending message\n");
+		goto err;
+	}
+
+	index = bcdev->ap_read_buffer_dump->data_size;
+	if (index >= len)
+		goto err;
+
+	memcpy(info, bcdev->ap_read_buffer_dump->data_buffer, index);
+	memset(bcdev->ap_read_buffer_dump, 0, sizeof(*bcdev->ap_read_buffer_dump));
+	mutex_unlock(&bcdev->ap_read_buffer_lock);
+	return index;
+err:
+	memset(bcdev->ap_read_buffer_dump, 0, sizeof(*bcdev->ap_read_buffer_dump));
+	mutex_unlock(&bcdev->ap_read_buffer_lock);
+	return -EINVAL;
+}
+
 static void oplus_get_manu_battinfo_work(struct work_struct *work)
 {
 	int rc = 0;
@@ -9602,6 +9645,10 @@ static void *oplus_chg_8350_gauge_get_func(struct oplus_chg_ic_dev *ic_dev,
 	case OPLUS_IC_FUNC_GAUGE_SET_LAST_CC:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_GAUGE_SET_DEEP_DISCHG_COUNT,
 						  oplus_fg_set_last_cc);
+		break;
+	case OPLUS_IC_FUNC_GAUGE_GET_GAUGE_R_INFO:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_GAUGE_GET_GAUGE_R_INFO,
+					       oplus_sm8350_get_gauge_r_info);
 		break;
 	default:
 		chg_err("this func(=%d) is not supported\n", func_id);

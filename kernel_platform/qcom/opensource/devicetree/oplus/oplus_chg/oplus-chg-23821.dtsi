@@ -399,6 +399,7 @@
 					OPLUS_IC_FUNC_GAUGE_SET_LAST_CC
 					OPLUS_IC_FUNC_GAUGE_GET_LAST_CC
 					OPLUS_IC_FUNC_GAUGE_GET_REAL_TIME_CURR
+					OPLUS_IC_FUNC_GAUGE_GET_GAUGE_R_INFO
 				>;
 				virqs = <
 					OPLUS_IC_VIRQ_ERR
@@ -709,6 +710,7 @@
 		oplus_spec,current_limit_of_drop_soc_2 = <350>;
 		oplus_spec,volt_of_fast_drop_soc_1 = <2700>;
 		oplus_spec,support_uisoc_low_battery_control;
+		oplus_spec,support_gauge_r_track;
 
 		oplus_spec,wls-ffc-step-max = <2>;
 		oplus_spec,wls-ffc-fv-mv = <4590 4590>;

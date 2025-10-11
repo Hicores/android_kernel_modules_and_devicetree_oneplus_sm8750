@@ -40,15 +40,6 @@ inline void systrace_c_signed_printk(const char *msg, long val)
 	}
 }
 
-inline void htb_systrace_c_printk(const char *prefix, int digit, const char *comm, int val)
-{
-	if (g_debug_enable == 1) {
-		char buf[128];
-		snprintf(buf, sizeof(buf), "C|99999|%s_%d_%.5s|%d\n", prefix, digit, comm, val);
-		tracing_mark_write(buf);
-	}
-}
-
 static void sched_setaffinity_early_hook(void *unused, struct task_struct *p,
 	const struct cpumask *in_mask, bool *skip)
 {

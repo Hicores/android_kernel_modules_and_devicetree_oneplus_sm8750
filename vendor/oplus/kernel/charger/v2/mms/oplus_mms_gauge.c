@@ -2807,6 +2807,40 @@ static int oplus_mms_gauge_get_reg_info(struct oplus_mms *mms, union mms_msg_dat
 	return rc;
 }
 
+static int oplus_mms_gauge_get_r_info(struct oplus_mms *mms, union mms_msg_data *data)
+{
+	struct oplus_mms_gauge *chip;
+	int rc = 0;
+
+	if (mms == NULL) {
+		chg_err("mms is NULL");
+		return -EINVAL;
+	}
+	if (data == NULL) {
+		chg_err("data is NULL");
+		return -EINVAL;
+	}
+
+	chip = oplus_mms_get_drvdata(mms);
+	if (!chip || !chip->gauge_r_info[0]) {
+		chg_err("gauge_r_info[0] is NULL");
+		return -EINVAL;
+	}
+
+	rc = oplus_chg_ic_func(chip->gauge_ic, OPLUS_IC_FUNC_GAUGE_GET_GAUGE_R_INFO,
+				chip->gauge_r_info[0], GAUGE_REG_INFO_SIZE);
+	if (rc == -ENOTSUPP)
+		rc = 0;
+
+	if (rc >= GAUGE_REG_INFO_SIZE)
+		chip->gauge_r_info[0][GAUGE_REG_INFO_SIZE - 1] = '\0';
+	else if (rc > 0 && rc < GAUGE_REG_INFO_SIZE)
+		chip->gauge_r_info[0][rc] = '\0';
+
+	data->strval = chip->gauge_r_info[0];
+	return rc;
+}
+
 static int oplus_mms_sub_gauge_get_reg_info(struct oplus_mms *mms, union mms_msg_data *data)
 {
 	struct oplus_mms_gauge *chip;
@@ -2908,7 +2942,7 @@ static void oplus_mms_gauge_check_calib_time_update(struct oplus_mms *mms,
 			int dod_calib_time, int qmax_calib_time, struct gauge_calib_info *calib_info)
 {
 	int i;
-	bool update;
+	bool update = false;
 	bool calib_info_init = false;
 	struct oplus_mms_gauge *chip;
 
@@ -3868,6 +3902,12 @@ static struct mms_item oplus_mms_gauge_item[] = {
 			.dead_thr_enable = false,
 			.update = oplus_mms_gauge_update_ratio_limit_curr,
 		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_GAUGE_R_INFO,
+			.str_data = true,
+			.update = oplus_mms_gauge_get_r_info,
+		}
 	}
 };
 
@@ -4691,10 +4731,12 @@ static int oplus_mms_gauge_topic_init(struct oplus_mms_gauge *chip)
 		return rc;
 	}
 	vote(chip->gauge_update_votable, DEF_VOTER, true, oplus_mms_gauge_desc.update_interval, false);
-	for (i = 0; i < chip->child_num; i++)
+	for (i = 0; i < chip->child_num; i++) {
 		chip->gauge_reg_info[i] = devm_kzalloc(chip->dev,
 					sizeof(unsigned char) * GAUGE_REG_INFO_SIZE, GFP_KERNEL);
-
+		chip->gauge_r_info[i] = devm_kzalloc(chip->dev,
+					sizeof(unsigned char) * GAUGE_REG_INFO_SIZE, GFP_KERNEL);
+	}
 	if (is_support_parallel(chip)) {
 		mms_cfg.update_interval = 0;
 		mms_desc = devm_kzalloc(chip->dev, sizeof(struct oplus_mms_desc) * chip->child_num,
