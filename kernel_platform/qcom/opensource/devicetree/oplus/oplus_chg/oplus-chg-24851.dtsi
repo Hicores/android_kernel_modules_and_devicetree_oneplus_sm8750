@@ -746,7 +746,7 @@
 		oplus,vooc_data_width = <7>;
 		oplus,vooc_curr_max = <CURR_LIMIT_7BIT_11_0A>;
 		oplus,support_vooc_by_normal_charger_path;
-		oplus,vooc_project = <8>;
+		oplus,vooc_project = <14>;
 		oplus,vooc_power_max_w = <120>;
 		oplus,voocphy_support = <2>;
 		oplus,support_fake_vooc_check;
@@ -1141,7 +1141,7 @@
 		oplus_spec,vooc_normal_low_temp = <350>;
 		oplus_spec,vooc_strategy_normal_current = <100>;
 		oplus_spec,vooc_normal_to_little_cool_current = <100>;
-		oplus_spec,vooc_over_high_temp = <510>;
+		oplus_spec,vooc_over_high_temp = <500>;
 		oplus_spec,vooc_low_temp = <50>;
 		oplus_spec,vooc_high_temp = <500>;
 		oplus_spec,vooc_low_soc = <0>;
@@ -1219,11 +1219,11 @@
 								 750 4550 0
 								 650 4540 0
 								 500 4530 1>;
-				strategy_temp_range_t5 =	<1600 4555 0
-								 1450 4544 0
+				strategy_temp_range_t5 =	<1600 4564 0
+								 1450 4558 0
 								 1300 4535 0
 								 1150 4535 0
-								 1000 4525 1>;
+								 1000 4510 1>;
 			};
 		};
 
@@ -1794,11 +1794,11 @@
 								 750 4550 0
 								 650 4540 0
 								 500 4530 1>;
-				strategy_temp_range_t5 =	<1600 4555 0
-								 1450 4544 0
+				strategy_temp_range_t5 =	<1600 4564 0
+								 1450 4558 0
 								 1300 4535 0
 								 1150 4535 0
-								 1000 4525 1>;
+								 1000 4510 1>;
 			};
 		};
 
@@ -1832,11 +1832,11 @@
 								 750 4550 0
 								 650 4540 0
 								 500 4530 1>;
-				strategy_temp_range_t5 =	<1600 4555 0
-								 1450 4544 0
+				strategy_temp_range_t5 =	<1600 4564 0
+								 1450 4558 0
 								 1300 4535 0
 								 1150 4535 0
-								 1000 4525 1>;
+								 1000 4510 1>;
 			};
 		};
 

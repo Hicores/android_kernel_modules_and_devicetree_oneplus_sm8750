@@ -554,7 +554,7 @@
 					/* wait for te and blocking one frame */
 					39 00 00 20 00 00 04 FF 5A A5 00
 				];
-				qcom,mdss-dsi-fps-switch-60-to-120-compensation-command-state = "dsi_hs_mode";
+				qcom,mdss-dsi-fps-switch-60-to-120-compensation-command-state = "dsi_hs_sync1_mode";
 				qcom,mdss-dsi-hbm-off-command = [
 				];
 				qcom,mdss-dsi-hbm-on-command = [
@@ -926,8 +926,8 @@
 					15 00 00 00 00 00 02 7D 01
 					// Evt Output enable for Hsync and Vsync
 					39 00 00 40 00 00 04 FF 5A A5 20
-					15 00 00 40 00 00 02 BA 04
-					15 00 00 00 00 00 02 BB 00
+					15 00 00 40 00 00 02 BA 00 //VSYNC
+					15 00 00 00 00 00 02 BB 05 //HSYNC
 					// ODC ON
 					39 00 00 40 00 00 04 FF 5A A5 49
 					15 00 00 40 00 00 02 E0 01
@@ -1482,7 +1482,7 @@
 					//queue2_str
 					39 00 00 40 00 00 04 FF 5A A5 00
 					15 00 00 40 00 00 02 60 05
-					15 00 00 40 00 00 02 7D 01
+					15 00 00 40 00 00 02 7D 00
 					39 00 00 40 00 00 04 FF 5A A5 24
 					39 00 00 40 00 00 06 C9 00 00 00 10 00
 					39 00 00 40 00 00 04 FE 30 00 50
@@ -1685,7 +1685,7 @@
 					/* wait for te and blocking one frame */
 					39 00 00 20 00 00 04 FF 5A A5 00
 				];
-				qcom,mdss-dsi-fps-switch-120-to-60-compensation-command-state = "dsi_hs_mode";
+				qcom,mdss-dsi-fps-switch-120-to-60-compensation-command-state = "dsi_hs_sync1_mode";
 				qcom,mdss-dsi-hbm-off-command = [
 				];
 				qcom,mdss-dsi-hbm-on-command = [
@@ -2569,6 +2569,7 @@
 					15 00 00 40 00 00 02 53 20 // BCOn
 					// 165hz
 					39 00 00 40 00 00 04 FF 5A A5 00
+					15 00 00 00 00 00 02 7D 03
 					15 00 00 00 00 00 02 60 02
 					// Evt Output enable for Hsync and Vsync
 					39 00 00 40 00 00 04 FF 5A A5 20

@@ -3946,8 +3946,8 @@ static void oplus_pps_gauge_update_work(struct work_struct *work)
 	struct oplus_pps *chip =
 		container_of(work, struct oplus_pps, gauge_update_work);
 
-#define PPS_RECOVERY_IBAT_THD (-1000)
-#define PPS_RECOVERY_IBAT_TIMES (5)
+#define PPS_RECOVERY_IBAT_THD (-600)
+#define PPS_RECOVERY_IBAT_TIMES (3)
 
 	if (chip->pps_not_allow)
 		oplus_pps_charge_allow_check(chip);
@@ -3958,15 +3958,17 @@ static void oplus_pps_gauge_update_work(struct work_struct *work)
 	else
 		wired_type = msg_data.intval;
 
-
 	if ((wired_type == OPLUS_CHG_USB_TYPE_PD_PPS) &&
 	    is_client_vote_enabled(chip->pps_disable_votable, PPS_IBAT_ABNOR_VOTER)) {
 		rc = oplus_mms_get_item_data(chip->gauge_topic, GAUGE_ITEM_CURR, &msg_data, true);
 		if (unlikely(rc < 0)) {
 			chg_err("can't get ibat, rc=%d\n", rc);
 		} else {
+			chg_info("current = %d, recovery=%d, pd_pps is disable by the PPS_IBAT_ABNOR_VOTER\n",
+				 msg_data.intval, chip->count.pps_recovery);
 			if (msg_data.intval < PPS_RECOVERY_IBAT_THD) {
-				if (chip->count.pps_recovery > PPS_RECOVERY_IBAT_TIMES) {
+				if (chip->count.pps_recovery >= PPS_RECOVERY_IBAT_TIMES) {
+					chg_info("retry to recovery the pps charging!\n");
 					vote(chip->pps_disable_votable, PPS_IBAT_ABNOR_VOTER, false, 0, false);
 					oplus_cpa_request(chip->cpa_topic, CHG_PROTOCOL_PPS);
 				}
